@@ -1,0 +1,67 @@
+import Foundation
+
+/// 小组件一次刷新所需的全部数据，由 Widget 的 TimelineProvider 从存储读取。
+public struct WidgetSnapshot: Sendable {
+    public var date: Date
+    /// 今天的条目（含全天），按开始时间排序。
+    public var today: [CalendarItem]
+    public var tomorrowCount: Int
+    public var tomorrowFirst: CalendarItem?
+    /// 未来 14 天内最近的一次出行。
+    public var nextTrip: CalendarItem?
+    public var monthlySubscriptionCost: Decimal
+    public var subscriptionCount: Int
+    public var nextRenewal: (subscription: Subscription, date: Date)?
+    public var pendingCount: Int
+
+    /// 正在进行的条目。
+    public var current: CalendarItem? {
+        today.first { !$0.isAllDay && $0.end != nil && $0.start <= date && date < $0.effectiveEnd }
+    }
+
+    /// 下一个还没开始的条目。
+    public var next: CalendarItem? {
+        today.first { !$0.isAllDay && $0.start > date }
+    }
+
+    public static func load(from store: ItemStore, now: Date = .now, calendar: Calendar = .mondayFirst) throws -> WidgetSnapshot {
+        let dayStart = calendar.startOfDay(for: now)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: dayStart)!
+        let dayAfter = calendar.date(byAdding: .day, value: 1, to: tomorrow)!
+        let today = try store.items(in: DateInterval(start: dayStart, end: tomorrow))
+            .filter { $0.start >= dayStart || !$0.isAllDay }
+        let tomorrowItems = try store.items(in: DateInterval(start: tomorrow, end: dayAfter)).filter { $0.start >= tomorrow }
+        let horizon = calendar.date(byAdding: .day, value: 14, to: dayStart)!
+        let nextTrip = try store.items(in: DateInterval(start: now, end: horizon))
+            .first { $0.sourceKind == .travel && $0.start >= now }
+
+        let subs = try store.subscriptions().filter(\.isActive)
+        let nextRenewal = subs
+            .compactMap { sub in sub.nextRenewal(after: now, calendar: calendar).map { (sub, $0) } }
+            .min { $0.1 < $1.1 }
+
+        return WidgetSnapshot(
+            date: now,
+            today: today,
+            tomorrowCount: tomorrowItems.count,
+            tomorrowFirst: tomorrowItems.first { !$0.isAllDay } ?? tomorrowItems.first,
+            nextTrip: nextTrip,
+            monthlySubscriptionCost: subs.reduce(0) { $0 + $1.monthlyCost },
+            subscriptionCount: subs.count,
+            nextRenewal: nextRenewal.map { (subscription: $0.0, date: $0.1) },
+            pendingCount: try store.pendingItems().count
+        )
+    }
+
+    /// 小组件的刷新时间点：每个条目开始和结束时刷新一次，保证「进行中 / 下一项」准确。
+    public func refreshDates(calendar: Calendar = .mondayFirst) -> [Date] {
+        let boundaries = today.flatMap { [$0.start, $0.effectiveEnd] }.filter { $0 > date }
+        let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date))!
+        return [date] + Array(Set(boundaries + [midnight])).sorted()
+    }
+
+    public static let placeholder = WidgetSnapshot(
+        date: .now, today: [], tomorrowCount: 0, tomorrowFirst: nil, nextTrip: nil,
+        monthlySubscriptionCost: 0, subscriptionCount: 0, nextRenewal: nil, pendingCount: 0
+    )
+}

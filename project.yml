@@ -1,0 +1,79 @@
+# XcodeGen 工程描述。装好 Xcode 和 xcodegen 后运行 `xcodegen generate` 生成 Daily.xcodeproj。
+name: Daily
+options:
+  bundleIdPrefix: com.rain.daily
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    # 在 Xcode 的 Signing & Capabilities 里选你的 Personal Team，或在这里填 Team ID。
+    DEVELOPMENT_TEAM: ""
+
+packages:
+  DailyKit:
+    path: Packages/DailyKit
+
+targets:
+  Daily:
+    type: application
+    platform: macOS
+    sources: [App]
+    dependencies:
+      - package: DailyKit
+        product: DailyKit
+      - package: DailyKit
+        product: DailyUI
+      - target: DailyWidget
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rain.daily
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Daily
+        LSApplicationCategoryType: public.app-category.productivity
+        DailyAppGroup: $(TeamIdentifierPrefix)com.rain.daily
+        NSCalendarsFullAccessUsageDescription: Daily 需要读取系统日历，把它们和其他来源的日程合并显示。
+        NSRemindersFullAccessUsageDescription: Daily 需要读取提醒事项，把待办和日程一起显示。
+    entitlements:
+      path: App/Daily.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.personal-information.calendars: true
+        com.apple.security.application-groups:
+          - $(TeamIdentifierPrefix)com.rain.daily
+
+  DailyWidget:
+    type: app-extension
+    platform: macOS
+    sources: [Widget]
+    dependencies:
+      - package: DailyKit
+        product: DailyKit
+      - package: DailyKit
+        product: DailyUI
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rain.daily.widget
+    info:
+      path: Widget/Info.plist
+      properties:
+        CFBundleDisplayName: Daily 小组件
+        DailyAppGroup: $(TeamIdentifierPrefix)com.rain.daily
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: Widget/DailyWidget.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.application-groups:
+          - $(TeamIdentifierPrefix)com.rain.daily
