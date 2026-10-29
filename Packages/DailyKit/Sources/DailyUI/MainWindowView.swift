@@ -18,6 +18,9 @@ public struct MainWindowView: View {
         } detail: {
             pageContent
                 .background(Color(nsColor: .textBackgroundColor))
+                // 标题交给系统排版：新版 macOS 会把同一组工具栏按钮包进圆角胶囊，自定义文字放进去会顶到边上。
+                .navigationTitle(model.title)
+                .navigationSubtitle(model.subtitle)
                 .toolbar { toolbar }
         }
         .environment(\.uiScale, model.textScale)
@@ -66,11 +69,6 @@ public struct MainWindowView: View {
             Button { page(1) } label: { Image(systemName: "chevron.right") }
                 .help("下一页（⌘→）")
                 .keyboardShortcut(.rightArrow, modifiers: .command)
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(model.title).scaledFont(17, weight: .semibold)
-                Text(model.subtitle).scaledFont(14).foregroundStyle(.secondary)
-            }
-            .padding(.leading, 6)
         }
         ToolbarItem(placement: .principal) {
             Picker("视图", selection: $model.mode) {
