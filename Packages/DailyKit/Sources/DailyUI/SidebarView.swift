@@ -3,6 +3,7 @@ import SwiftUI
 
 /// 左侧边栏：迷你月历、待确认入口、按来源筛选、同步状态。
 struct SidebarView: View {
+    @Environment(\.uiScale) private var scale
     @Bindable var model: CalendarModel
 
     var body: some View {
@@ -17,7 +18,7 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 4) {
                 StatusLine(text: model.lastSync.map { "全部来源已同步 · \($0.formatted("H:mm"))" } ?? "尚未同步")
                 if let error = model.loadError {
-                    Text(error).font(.system(size: 10)).foregroundStyle(.red).lineLimit(2)
+                    Text(error).scaledFont(10).foregroundStyle(.red).lineLimit(2)
                 }
             }
             .padding(.horizontal, 18)
@@ -36,15 +37,15 @@ struct SidebarView: View {
                         Text("待确认")
                         Spacer()
                         Text("\(model.pending.count)")
-                            .font(.system(size: 11, weight: .semibold))
+                            .scaledFont(11, weight: .semibold)
                             .foregroundStyle(.white)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 1)
                             .background(Capsule().fill(SourceKind.message.color))
                     }
-                    .font(.system(size: 13))
+                    .scaledFont(13)
                     .padding(.horizontal, 8)
-                    .frame(height: 30)
+                    .frame(height: 30 * scale)
                     .background(RoundedRectangle(cornerRadius: 7).fill(SourceKind.message.tint))
                     .contentShape(Rectangle())
                 }
@@ -53,7 +54,7 @@ struct SidebarView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("数据来源")
-                    .font(.system(size: 11, weight: .semibold))
+                    .scaledFont(11, weight: .semibold)
                     .foregroundStyle(.secondary)
                     .padding(.leading, 6)
                 ForEach(SourceKind.allCases, id: \.self) { kind in
@@ -71,6 +72,7 @@ struct SidebarView: View {
 
 /// 「系统日历」下面的子列表：未授权时给出授权入口，授权后按账户列出每个日历，可单独开关。
 private struct SystemCalendarList: View {
+    @Environment(\.uiScale) private var scale
     @Bindable var model: CalendarModel
 
     var body: some View {
@@ -91,21 +93,21 @@ private struct SystemCalendarList: View {
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: model.systemCalendarsExpanded ? "chevron.down" : "chevron.right")
-                                .font(.system(size: 9, weight: .semibold))
+                                .scaledFont(9, weight: .semibold)
                             Text("\(model.systemCalendars.count) 个日历")
                         }
-                        .font(.system(size: 11))
+                        .scaledFont(11)
                         .foregroundStyle(.secondary)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .padding(.leading, 29)
-                    .frame(height: 20)
+                    .frame(height: 20 * scale)
                 }
                 if model.systemCalendarsExpanded {
                     ForEach(model.calendarsByAccount, id: \.account) { group in
                         Text(group.account)
-                            .font(.system(size: 10, weight: .semibold))
+                            .scaledFont(10, weight: .semibold)
                             .foregroundStyle(.secondary)
                             .padding(.leading, 29)
                             .padding(.top, 4)
@@ -124,17 +126,18 @@ private struct SystemCalendarList: View {
     private func hint(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 11))
+                .scaledFont(11)
                 .foregroundStyle(SourceKind.systemCalendar.color)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .padding(.leading, 29)
-        .frame(height: 22)
+        .frame(height: 22 * scale)
     }
 }
 
 private struct CalendarToggleRow: View {
+    @Environment(\.uiScale) private var scale
     let calendar: SystemCalendarInfo
     let isOn: Bool
     let action: () -> Void
@@ -147,15 +150,15 @@ private struct CalendarToggleRow: View {
                 Circle()
                     .fill(isOn ? color : .clear)
                     .strokeBorder(color, lineWidth: isOn ? 0 : 1.5)
-                    .frame(width: 9, height: 9)
+                    .frame(width: 9 * scale, height: 9 * scale)
                 Text(calendar.title)
                     .foregroundStyle(isOn ? .primary : .secondary)
                     .lineLimit(1)
                 Spacer()
             }
-            .font(.system(size: 12))
+            .scaledFont(12)
             .padding(.leading, 31)
-            .frame(height: 22)
+            .frame(height: 22 * scale)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -164,6 +167,7 @@ private struct CalendarToggleRow: View {
 }
 
 private struct SourceRow: View {
+    @Environment(\.uiScale) private var scale
     let kind: SourceKind
     let count: Int
     let isOn: Bool
@@ -175,23 +179,23 @@ private struct SourceRow: View {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(isOn ? kind.color : .clear)
                     .strokeBorder(kind.color, lineWidth: isOn ? 0 : 1.5)
-                    .frame(width: 14, height: 14)
+                    .frame(width: 14 * scale, height: 14 * scale)
                     .overlay {
                         if isOn {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 8, weight: .heavy))
+                                .scaledFont(8, weight: .heavy)
                                 .foregroundStyle(.white)
                         }
                     }
                 Text(kind.displayName)
                 Spacer()
                 if count > 0 {
-                    Text("\(count)").foregroundStyle(.secondary).font(.system(size: 12))
+                    Text("\(count)").foregroundStyle(.secondary).scaledFont(12)
                 }
             }
-            .font(.system(size: 13))
+            .scaledFont(13)
             .padding(.horizontal, 6)
-            .frame(height: 26)
+            .frame(height: 26 * scale)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -206,12 +210,13 @@ private struct StatusLine: View {
             Circle().fill(Color.green).frame(width: 6, height: 6)
             Text(text)
         }
-        .font(.system(size: 11))
+        .scaledFont(11)
         .foregroundStyle(.secondary)
     }
 }
 
 struct MiniMonthView: View {
+    @Environment(\.uiScale) private var scale
     @Bindable var model: CalendarModel
 
     var body: some View {
@@ -221,22 +226,22 @@ struct MiniMonthView: View {
         let week = Set(model.mode == .week ? model.visibleDays.map { cal.startOfDay(for: $0) } : [])
         VStack(alignment: .leading, spacing: 8) {
             Text(model.anchorDate.formatted("yyyy年M月", calendar: cal))
-                .font(.system(size: 13, weight: .semibold))
+                .scaledFont(13, weight: .semibold)
                 .padding(.leading, 4)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7), spacing: 2) {
                 ForEach(["一", "二", "三", "四", "五", "六", "日"], id: \.self) {
-                    Text($0).font(.system(size: 11)).foregroundStyle(.secondary).frame(height: 20)
+                    Text($0).scaledFont(11).foregroundStyle(.secondary).frame(height: 20 * scale)
                 }
                 ForEach(days, id: \.self) { day in
                     let today = model.isToday(day)
                     let inMonth = cal.component(.month, from: day) == month
                     Button { model.anchorDate = day } label: {
                         Text("\(cal.component(.day, from: day))")
-                            .font(.system(size: 12, weight: today ? .semibold : .regular))
+                            .scaledFont(12, weight: today ? .semibold : .regular)
                             .foregroundStyle(today ? .white : (inMonth ? .primary : .secondary))
-                            .frame(width: 22, height: 22)
+                            .frame(width: 22 * scale, height: 22 * scale)
                             .background(Circle().fill(today ? Palette.today : .clear))
-                            .frame(maxWidth: .infinity, minHeight: 26)
+                            .frame(maxWidth: .infinity, minHeight: 26 * scale)
                             .background(week.contains(cal.startOfDay(for: day)) ? Palette.weekRow : .clear)
                             .contentShape(Rectangle())
                     }

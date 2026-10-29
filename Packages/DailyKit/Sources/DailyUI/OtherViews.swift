@@ -13,7 +13,7 @@ struct AgendaListView: View {
                     if !items.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(day.formatted("M月d日 EEEE", calendar: model.calendar))
-                                .font(.system(size: 13, weight: .semibold))
+                                .scaledFont(13, weight: .semibold)
                                 .foregroundStyle(model.isToday(day) ? Palette.today : .primary)
                             ForEach(items) { item in
                                 AgendaRow(item: item, calendar: model.calendar)
@@ -29,20 +29,21 @@ struct AgendaListView: View {
 }
 
 struct AgendaRow: View {
+    @Environment(\.uiScale) private var scale
     let item: CalendarItem
     let calendar: Calendar
 
     var body: some View {
         HStack(spacing: 12) {
             Text(item.isAllDay ? "全天" : item.start.formatted("H:mm", calendar: calendar))
-                .font(.system(size: 12).monospacedDigit())
+                .scaledFont(12, monospacedDigit: true)
                 .foregroundStyle(.secondary)
-                .frame(width: 44, alignment: .trailing)
-            RoundedRectangle(cornerRadius: 2).fill(item.displayColor).frame(width: 4, height: 30)
+                .frame(width: 44 * scale, alignment: .trailing)
+            RoundedRectangle(cornerRadius: 2).fill(item.displayColor).frame(width: 4, height: 30 * scale)
             VStack(alignment: .leading, spacing: 1) {
-                Text(item.title).font(.system(size: 13, weight: .semibold))
+                Text(item.title).scaledFont(13, weight: .semibold)
                 Text([item.location, item.sourceKind.displayName].compactMap { $0 }.joined(separator: " · "))
-                    .font(.system(size: 11))
+                    .scaledFont(11)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -55,6 +56,7 @@ struct AgendaRow: View {
 
 /// 月视图：每格列出当天前几条日程。
 struct MonthView: View {
+    @Environment(\.uiScale) private var scale
     let model: CalendarModel
 
     var body: some View {
@@ -64,10 +66,10 @@ struct MonthView: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 ForEach(["周一", "周二", "周三", "周四", "周五", "周六", "周日"], id: \.self) {
-                    Text($0).font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+                    Text($0).scaledFont(12).foregroundStyle(.secondary).frame(maxWidth: .infinity)
                 }
             }
-            .frame(height: 32)
+            .frame(height: 32 * scale)
             Divider()
             Grid(horizontalSpacing: 0, verticalSpacing: 0) {
                 ForEach(0..<(days.count / 7), id: \.self) { row in
@@ -86,19 +88,19 @@ struct MonthView: View {
         let today = model.isToday(day)
         return VStack(alignment: .leading, spacing: 2) {
             Text("\(model.calendar.component(.day, from: day))")
-                .font(.system(size: 12, weight: today ? .bold : .regular))
+                .scaledFont(12, weight: today ? .bold : .regular)
                 .foregroundStyle(today ? .white : (inMonth ? .primary : .secondary))
-                .frame(minWidth: 22, minHeight: 22)
+                .frame(minWidth: 22 * scale, minHeight: 22 * scale)
                 .background(Circle().fill(today ? Palette.today : .clear))
             ForEach(items.prefix(3)) { item in
                 HStack(spacing: 4) {
                     Circle().fill(item.displayColor).frame(width: 5, height: 5)
                     Text(item.title).lineLimit(1)
                 }
-                .font(.system(size: 10))
+                .scaledFont(10)
             }
             if items.count > 3 {
-                Text("还有 \(items.count - 3) 项").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("还有 \(items.count - 3) 项").scaledFont(10).foregroundStyle(.secondary)
             }
         }
         .padding(4)
@@ -127,11 +129,11 @@ struct PendingInboxView: View {
             ForEach(model.pending) { item in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(item.metadata["from"] ?? item.sourceKind.displayName)
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                    Text(item.title).font(.system(size: 14, weight: .semibold))
+                        .scaledFont(11).foregroundStyle(.secondary)
+                    Text(item.title).scaledFont(14, weight: .semibold)
                     Text([item.start.formatted("M月d日 EEE H:mm", calendar: model.calendar), item.location]
                         .compactMap { $0 }.joined(separator: " · "))
-                        .font(.system(size: 12))
+                        .scaledFont(12)
                     HStack {
                         Button("加入日历") { model.confirm(item) }.buttonStyle(.borderedProminent)
                         Button("忽略") { model.dismiss(item) }

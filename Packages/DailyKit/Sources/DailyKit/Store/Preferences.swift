@@ -14,6 +14,12 @@ public struct Preferences: Sendable {
         suiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
     }
 
+    /// 主窗口的字体缩放比例。
+    public var textScale: Double {
+        get { defaults.object(forKey: "textScale") as? Double ?? 1.15 }
+        nonmutating set { defaults.set(newValue, forKey: "textScale") }
+    }
+
     /// 不同步的系统日历（EKCalendar.calendarIdentifier）。
     public var excludedCalendarIDs: Set<String> {
         get { Set(defaults.stringArray(forKey: "excludedCalendarIDs") ?? []) }

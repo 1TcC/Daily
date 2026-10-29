@@ -4,8 +4,9 @@ import SwiftUI
 /// 周视图 / 日视图：顶部日期行、全天行，下面是可滚动的 24 小时网格。
 struct WeekView: View {
     let model: CalendarModel
-    var hourHeight: CGFloat = 44
-    var gutter: CGFloat = 56
+    @Environment(\.uiScale) private var scale
+    private var hourHeight: CGFloat { (44 * scale).rounded() }
+    private var gutter: CGFloat { (56 * scale).rounded() }
 
     var body: some View {
         let days = model.visibleDays
@@ -36,22 +37,22 @@ struct WeekView: View {
                     Text(day.formatted("EEE", calendar: model.calendar))
                         .foregroundStyle(today ? Palette.today : .secondary)
                     Text(day.formatted("d", calendar: model.calendar))
-                        .font(.system(size: 15, weight: .semibold))
+                        .scaledFont(15, weight: .semibold)
                         .foregroundStyle(today ? .white : .primary)
-                        .frame(minWidth: 26, minHeight: 26)
+                        .frame(minWidth: 26 * scale, minHeight: 26 * scale)
                         .background(Circle().fill(today ? Palette.today : .clear))
                 }
-                .font(.system(size: 13))
+                .scaledFont(13)
                 .frame(maxWidth: .infinity)
             }
         }
-        .frame(height: 52)
+        .frame(height: 52 * scale)
     }
 
     private func allDayRow(_ days: [Date]) -> some View {
         HStack(alignment: .top, spacing: 0) {
             Text("全天")
-                .font(.system(size: 10))
+                .scaledFont(10)
                 .foregroundStyle(.secondary)
                 .frame(width: gutter - 8, alignment: .trailing)
                 .padding(.trailing, 8)
@@ -67,7 +68,7 @@ struct WeekView: View {
             }
         }
         .padding(.vertical, 4)
-        .frame(minHeight: 30)
+        .frame(minHeight: 30 * scale)
     }
 
     // MARK: - 时间网格
@@ -77,7 +78,7 @@ struct WeekView: View {
             VStack(spacing: 0) {
                 ForEach(0..<24, id: \.self) { hour in
                     Text(hour == 0 ? "" : "\(hour):00")
-                        .font(.system(size: 10))
+                        .scaledFont(10)
                         .foregroundStyle(.secondary)
                         .frame(width: gutter - 8, height: hourHeight, alignment: .topTrailing)
                         .offset(y: -6)
@@ -152,6 +153,7 @@ private struct DayColumn: View {
 }
 
 private struct EventBlock: View {
+    @Environment(\.uiScale) private var scale
     let item: CalendarItem
     let height: CGFloat
     let calendar: Calendar
@@ -161,18 +163,18 @@ private struct EventBlock: View {
             HStack(spacing: 5) {
                 Circle().fill(item.displayColor).frame(width: 6, height: 6)
                 Text(item.title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .scaledFont(12, weight: .semibold)
                     .lineLimit(1)
             }
-            if height >= 40 {
+            if height >= 40 * scale {
                 Text(timeText)
-                    .font(.system(size: 11))
+                    .scaledFont(11)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            if height >= 56, let location = item.location {
+            if height >= 56 * scale, let location = item.location {
                 Text(location)
-                    .font(.system(size: 11))
+                    .scaledFont(11)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
@@ -193,6 +195,7 @@ private struct EventBlock: View {
 }
 
 struct AllDayChip: View {
+    @Environment(\.uiScale) private var scale
     let item: CalendarItem
 
     var body: some View {
@@ -200,9 +203,9 @@ struct AllDayChip: View {
             Circle().fill(item.displayColor).frame(width: 6, height: 6)
             Text(item.title).lineLimit(1)
         }
-        .font(.system(size: 11))
+        .scaledFont(11)
         .padding(.horizontal, 6)
-        .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 22 * scale, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 5).fill(item.displayTint))
     }
 }

@@ -1,6 +1,7 @@
 import DailyKit
 import Foundation
 import Observation
+import SwiftUI
 
 public enum ViewMode: String, CaseIterable, Identifiable, Sendable {
     case day = "日"
@@ -30,6 +31,12 @@ public final class CalendarModel {
     public var hiddenKinds: Set<SourceKind> = []
     public var lastSync: Date?
     public var showingInbox = false
+    /// 主窗口字体缩放，见 `TextScale`。
+    public var textScale = CGFloat(Preferences.shared.textScale) {
+        didSet { Preferences.shared.textScale = Double(textScale) }
+    }
+    /// 上一次翻页的方向，决定月视图 / 列表切换时从哪一侧推入。
+    public private(set) var pageEdge: Edge = .trailing
     public var actions = CalendarActions()
 
     // 系统日历
@@ -125,7 +132,17 @@ public final class CalendarModel {
         anchorDate = calendar.date(byAdding: component, value: delta, to: anchorDate) ?? anchorDate
     }
 
-    public func goToToday() { anchorDate = now() }
+    /// 翻页并记录方向（用于过渡动画）。
+    public func page(_ delta: Int, vertical: Bool = false) {
+        pageEdge = vertical ? (delta > 0 ? .bottom : .top) : (delta > 0 ? .trailing : .leading)
+        step(delta)
+    }
+
+    public func goToToday() {
+        let today = now()
+        pageEdge = today < anchorDate ? .leading : .trailing
+        anchorDate = today
+    }
 
     public func isToday(_ date: Date) -> Bool { calendar.isDate(date, inSameDayAs: now()) }
 
