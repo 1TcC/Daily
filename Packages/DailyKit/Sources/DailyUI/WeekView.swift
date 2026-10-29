@@ -2,22 +2,41 @@ import DailyKit
 import SwiftUI
 
 /// 周视图 / 日视图：顶部日期行、全天行，下面是可滚动的 24 小时网格。
+/// 翻页时只有日期相关的三条（日期行、全天行、日期列）跟手平移；时间刻度、网格线和竖直滚动位置保持不动。
 struct WeekView: View {
     let model: CalendarModel
+    let pager: Pager
     @Environment(\.uiScale) private var scale
     private var hourHeight: CGFloat { (44 * scale).rounded() }
     private var gutter: CGFloat { (56 * scale).rounded() }
 
     var body: some View {
-        let days = model.visibleDays
+        let anchors = model.pageAnchors
         VStack(spacing: 0) {
-            header(days)
+            HStack(spacing: 0) {
+                Color.clear.frame(width: gutter)
+                PagedStrip(pager: pager, axis: .horizontal, anchors: anchors) { anchor in
+                    WeekHeaderPage(model: model, days: model.days(for: anchor))
+                }
+            }
+            .frame(height: 52 * scale)
             Divider()
-            allDayRow(days)
+            HStack(alignment: .top, spacing: 0) {
+                Text("全天")
+                    .scaledFont(10)
+                    .foregroundStyle(.secondary)
+                    .frame(width: gutter - 8, alignment: .trailing)
+                    .padding(.trailing, 8)
+                    .padding(.top, 8)
+                PagedStrip(pager: pager, axis: .horizontal, anchors: anchors) { anchor in
+                    AllDayPage(model: model, days: model.days(for: anchor))
+                }
+            }
+            .frame(height: allDayHeight(anchors))
             Divider()
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
-                    grid(days)
+                    grid(anchors)
                         .padding(.top, 8)
                         .padding(.bottom, 12)
                 }
@@ -26,54 +45,13 @@ struct WeekView: View {
         }
     }
 
-    // MARK: - 顶部
-
-    private func header(_ days: [Date]) -> some View {
-        HStack(spacing: 0) {
-            Color.clear.frame(width: gutter)
-            ForEach(days, id: \.self) { day in
-                let today = model.isToday(day)
-                HStack(spacing: 6) {
-                    Text(day.formatted("EEE", calendar: model.calendar))
-                        .foregroundStyle(today ? Palette.today : .secondary)
-                    Text(day.formatted("d", calendar: model.calendar))
-                        .scaledFont(15, weight: .semibold)
-                        .foregroundStyle(today ? .white : .primary)
-                        .frame(minWidth: 26 * scale, minHeight: 26 * scale)
-                        .background(Circle().fill(today ? Palette.today : .clear))
-                }
-                .scaledFont(13)
-                .frame(maxWidth: .infinity)
-            }
-        }
-        .frame(height: 52 * scale)
+    /// 全天行高度取三页里最多的那一天，翻页时不跳动。
+    private func allDayHeight(_ anchors: [Date]) -> CGFloat {
+        let most = anchors.flatMap { model.days(for: $0) }.map { model.allDayItems(on: $0).count }.max() ?? 0
+        return max(30 * scale, CGFloat(most) * (22 * scale + 2) + 8)
     }
 
-    private func allDayRow(_ days: [Date]) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            Text("全天")
-                .scaledFont(10)
-                .foregroundStyle(.secondary)
-                .frame(width: gutter - 8, alignment: .trailing)
-                .padding(.trailing, 8)
-                .padding(.top, 4)
-            ForEach(days, id: \.self) { day in
-                VStack(spacing: 2) {
-                    ForEach(model.allDayItems(on: day)) { item in
-                        AllDayChip(item: item)
-                    }
-                }
-                .padding(.horizontal, 2)
-                .frame(maxWidth: .infinity, alignment: .top)
-            }
-        }
-        .padding(.vertical, 4)
-        .frame(minHeight: 30 * scale)
-    }
-
-    // MARK: - 时间网格
-
-    private func grid(_ days: [Date]) -> some View {
+    private func grid(_ anchors: [Date]) -> some View {
         HStack(alignment: .top, spacing: 0) {
             VStack(spacing: 0) {
                 ForEach(0..<24, id: \.self) { hour in
@@ -93,17 +71,75 @@ struct WeekView: View {
                         Spacer(minLength: 0).frame(height: hourHeight - 1)
                     }
                 }
-                HStack(spacing: 0) {
-                    ForEach(days, id: \.self) { day in
-                        DayColumn(model: model, day: day, hourHeight: hourHeight)
-                            .overlay(alignment: .leading) {
-                                Rectangle().fill(Palette.gridLine).frame(width: 1)
-                            }
-                    }
+                PagedStrip(pager: pager, axis: .horizontal, anchors: anchors) { anchor in
+                    WeekColumnsPage(model: model, days: model.days(for: anchor), hourHeight: hourHeight)
                 }
             }
         }
         .frame(height: hourHeight * 24)
+    }
+}
+
+private struct WeekHeaderPage: View {
+    let model: CalendarModel
+    let days: [Date]
+    @Environment(\.uiScale) private var scale
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(days, id: \.self) { day in
+                let today = model.isToday(day)
+                HStack(spacing: 6) {
+                    Text(day.formatted("EEE", calendar: model.calendar))
+                        .foregroundStyle(today ? Palette.today : .secondary)
+                    Text(day.formatted("d", calendar: model.calendar))
+                        .scaledFont(15, weight: .semibold)
+                        .foregroundStyle(today ? .white : .primary)
+                        .frame(minWidth: 26 * scale, minHeight: 26 * scale)
+                        .background(Circle().fill(today ? Palette.today : .clear))
+                }
+                .scaledFont(13)
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+}
+
+private struct AllDayPage: View {
+    let model: CalendarModel
+    let days: [Date]
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(days, id: \.self) { day in
+                VStack(spacing: 2) {
+                    ForEach(model.allDayItems(on: day)) { item in
+                        AllDayChip(item: item)
+                    }
+                }
+                .padding(.horizontal, 2)
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
+        }
+        .padding(.vertical, 4)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+}
+
+private struct WeekColumnsPage: View {
+    let model: CalendarModel
+    let days: [Date]
+    let hourHeight: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(days, id: \.self) { day in
+                DayColumn(model: model, day: day, hourHeight: hourHeight)
+                    .overlay(alignment: .leading) {
+                        Rectangle().fill(Palette.gridLine).frame(width: 1)
+                    }
+            }
+        }
     }
 }
 

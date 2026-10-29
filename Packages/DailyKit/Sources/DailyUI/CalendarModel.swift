@@ -35,8 +35,6 @@ public final class CalendarModel {
     public var textScale = CGFloat(Preferences.shared.textScale) {
         didSet { Preferences.shared.textScale = Double(textScale) }
     }
-    /// 上一次翻页的方向，决定月视图 / 列表切换时从哪一侧推入。
-    public private(set) var pageEdge: Edge = .trailing
     public var actions = CalendarActions()
 
     // 系统日历
@@ -60,7 +58,8 @@ public final class CalendarModel {
 
     public func reload() {
         do {
-            items = try store.items(in: visibleInterval)
+            // 连同前后相邻的一页一起加载，翻页拖动时相邻页也有数据。
+            items = try store.items(in: loadedInterval)
             pending = try store.pendingItems()
             loadError = nil
         } catch {
@@ -91,22 +90,33 @@ public final class CalendarModel {
 
     // MARK: - 日期范围
 
-    public var visibleDays: [Date] {
+    public var visibleDays: [Date] { days(for: anchorDate) }
+
+    /// 某一页（由该页内任意一天 `anchor` 确定）要显示的日期。
+    public func days(for anchor: Date) -> [Date] {
         switch mode {
         case .day:
-            return [calendar.startOfDay(for: anchorDate)]
+            return [calendar.startOfDay(for: anchor)]
         case .week, .list:
-            let start = calendar.startOfWeek(for: anchorDate)
+            let start = calendar.startOfWeek(for: anchor)
             return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
         case .month:
-            return monthGridDays(for: anchorDate)
+            return monthGridDays(for: anchor)
         }
     }
 
-    public var visibleInterval: DateInterval {
-        let days = visibleDays
-        let end = calendar.date(byAdding: .day, value: 1, to: days.last!)!
-        return DateInterval(start: days.first!, end: end)
+    public var visibleInterval: DateInterval { interval(of: visibleDays) }
+
+    /// 上一页、当前页、下一页的定位日期，翻页时三页并排渲染。
+    public var pageAnchors: [Date] { [anchor(offsetBy: -1), anchorDate, anchor(offsetBy: 1)] }
+
+    private var loadedInterval: DateInterval {
+        let first = days(for: anchor(offsetBy: -1)), last = days(for: anchor(offsetBy: 1))
+        return DateInterval(start: first.first!, end: interval(of: last).end)
+    }
+
+    private func interval(of days: [Date]) -> DateInterval {
+        DateInterval(start: days.first!, end: calendar.date(byAdding: .day, value: 1, to: days.last!)!)
     }
 
     /// 月视图需要的完整周（含上月末、下月初）。
@@ -123,26 +133,18 @@ public final class CalendarModel {
         return days
     }
 
-    public func step(_ delta: Int) {
+    public func anchor(offsetBy delta: Int) -> Date {
         let component: Calendar.Component = switch mode {
         case .day: .day
         case .week, .list: .weekOfYear
         case .month: .month
         }
-        anchorDate = calendar.date(byAdding: component, value: delta, to: anchorDate) ?? anchorDate
+        return calendar.date(byAdding: component, value: delta, to: anchorDate) ?? anchorDate
     }
 
-    /// 翻页并记录方向（用于过渡动画）。
-    public func page(_ delta: Int, vertical: Bool = false) {
-        pageEdge = vertical ? (delta > 0 ? .bottom : .top) : (delta > 0 ? .trailing : .leading)
-        step(delta)
-    }
+    public func step(_ delta: Int) { anchorDate = anchor(offsetBy: delta) }
 
-    public func goToToday() {
-        let today = now()
-        pageEdge = today < anchorDate ? .leading : .trailing
-        anchorDate = today
-    }
+    public func goToToday() { anchorDate = now() }
 
     public func isToday(_ date: Date) -> Bool { calendar.isDate(date, inSameDayAs: now()) }
 
@@ -179,7 +181,10 @@ public final class CalendarModel {
         return DateInterval(start: start, end: calendar.date(byAdding: .day, value: 1, to: start)!)
     }
 
-    public func count(of kind: SourceKind) -> Int { items.filter { $0.sourceKind == kind }.count }
+    public func count(of kind: SourceKind) -> Int {
+        let interval = visibleInterval
+        return items.filter { $0.sourceKind == kind && $0.overlaps(interval) }.count
+    }
 
     public func toggle(_ kind: SourceKind) {
         if hiddenKinds.contains(kind) { hiddenKinds.remove(kind) } else { hiddenKinds.insert(kind) }

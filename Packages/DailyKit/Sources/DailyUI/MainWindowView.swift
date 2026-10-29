@@ -4,6 +4,7 @@ import SwiftUI
 /// 主窗口（A · 原生简洁）：侧边栏 + 日 / 周 / 月 / 列表视图。
 public struct MainWindowView: View {
     @Bindable var model: CalendarModel
+    @State private var pager = Pager()
 
     public init(model: CalendarModel) {
         self.model = model
@@ -16,37 +17,41 @@ public struct MainWindowView: View {
                                                 max: 300 * model.textScale)
         } detail: {
             pageContent
-                // 双指左右滑动翻页；月视图里上下滑动也翻页，周 / 日视图上下滑动滚动时间轴。
-                .scrollPaging(vertical: model.mode == .month) { delta, vertical in
-                    model.page(delta, vertical: vertical)
-                }
-                .clipped()
                 .background(Color(nsColor: .textBackgroundColor))
                 .toolbar { toolbar }
         }
         .environment(\.uiScale, model.textScale)
         .sheet(isPresented: $model.showingInbox) { PendingInboxView(model: model) }
+        .onChange(of: model.mode) { pager.reset() }
     }
 
+    /// 双指左右滑动翻页（日 / 周 / 列表）；月视图上下滑动翻月。
     @ViewBuilder
     private var pageContent: some View {
         switch model.mode {
-        // 周 / 日视图不重建视图，保留时间轴的滚动位置。
         case .day, .week:
-            WeekView(model: model)
+            WeekView(model: model, pager: pager)
+                .pagingGesture(.horizontal, pager: pager) { model.step($0) }
         case .month:
-            MonthView(model: model)
-                .id(model.visibleInterval.start)
-                .transition(.push(from: model.pageEdge))
+            VStack(spacing: 0) {
+                MonthWeekdayHeader()
+                Divider()
+                PagedStrip(pager: pager, axis: .vertical, anchors: model.pageAnchors) { anchor in
+                    MonthPage(model: model, anchor: anchor)
+                }
+            }
+            .pagingGesture(.vertical, pager: pager) { model.step($0) }
         case .list:
-            AgendaListView(model: model)
-                .id(model.visibleInterval.start)
-                .transition(.push(from: model.pageEdge))
+            PagedStrip(pager: pager, axis: .horizontal, anchors: model.pageAnchors) { anchor in
+                AgendaPage(model: model, anchor: anchor)
+            }
+            .pagingGesture(.horizontal, pager: pager) { model.step($0) }
         }
     }
 
+    /// 工具栏按钮 / 快捷键翻页，和手势一样滑过去。
     private func page(_ delta: Int) {
-        withAnimation(.easeOut(duration: 0.22)) { model.page(delta) }
+        pager.finish(delta) { model.step(delta) }
     }
 
     @ToolbarContentBuilder
@@ -55,7 +60,7 @@ public struct MainWindowView: View {
             Button { page(-1) } label: { Image(systemName: "chevron.left") }
                 .help("上一页（⌘←）")
                 .keyboardShortcut(.leftArrow, modifiers: .command)
-            Button("今天") { withAnimation(.easeOut(duration: 0.22)) { model.goToToday() } }
+            Button("今天") { model.goToToday() }
                 .help("回到今天（⌘T）")
                 .keyboardShortcut("t", modifiers: .command)
             Button { page(1) } label: { Image(systemName: "chevron.right") }

@@ -1,14 +1,15 @@
 import DailyKit
 import SwiftUI
 
-/// 列表视图：按天分组列出当前一周的条目。
-struct AgendaListView: View {
+/// 列表视图的一页：按天分组列出一周的条目。
+struct AgendaPage: View {
     let model: CalendarModel
+    let anchor: Date
 
     var body: some View {
-        ScrollView {
+        ScrollView(.vertical) {
             LazyVStack(alignment: .leading, spacing: 18) {
-                ForEach(model.visibleDays, id: \.self) { day in
+                ForEach(model.days(for: anchor), id: \.self) { day in
                     let items = model.items(on: day)
                     if !items.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
@@ -55,22 +56,30 @@ struct AgendaRow: View {
 }
 
 /// 月视图：每格列出当天前几条日程。
-struct MonthView: View {
+struct MonthWeekdayHeader: View {
+    @Environment(\.uiScale) private var scale
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(["周一", "周二", "周三", "周四", "周五", "周六", "周日"], id: \.self) {
+                Text($0).scaledFont(12).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+            }
+        }
+        .frame(height: 32 * scale)
+    }
+}
+
+/// 月视图的一页（一个月）。
+struct MonthPage: View {
     @Environment(\.uiScale) private var scale
     let model: CalendarModel
+    let anchor: Date
 
     var body: some View {
         let cal = model.calendar
-        let days = model.visibleDays
-        let month = cal.component(.month, from: model.anchorDate)
+        let days = model.days(for: anchor)
+        let month = cal.component(.month, from: anchor)
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(["周一", "周二", "周三", "周四", "周五", "周六", "周日"], id: \.self) {
-                    Text($0).scaledFont(12).foregroundStyle(.secondary).frame(maxWidth: .infinity)
-                }
-            }
-            .frame(height: 32 * scale)
-            Divider()
             Grid(horizontalSpacing: 0, verticalSpacing: 0) {
                 ForEach(0..<(days.count / 7), id: \.self) { row in
                     GridRow {
