@@ -6,6 +6,26 @@ struct SidebarView: View {
     @Bindable var model: CalendarModel
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // 日历多时可以滚动，同步状态固定在底部。
+            ScrollView(.vertical) {
+                content
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 14)
+            }
+            .scrollIndicators(.never)
+            VStack(alignment: .leading, spacing: 4) {
+                StatusLine(text: model.lastSync.map { "全部来源已同步 · \($0.formatted("H:mm"))" } ?? "尚未同步")
+                if let error = model.loadError {
+                    Text(error).font(.system(size: 10)).foregroundStyle(.red).lineLimit(2)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+        }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 20) {
             MiniMonthView(model: model)
 
@@ -40,22 +60,106 @@ struct SidebarView: View {
                     SourceRow(kind: kind, count: model.count(of: kind), isOn: !model.hiddenKinds.contains(kind)) {
                         model.toggle(kind)
                     }
+                    if kind == .systemCalendar {
+                        SystemCalendarList(model: model)
+                    }
                 }
             }
-
-            Spacer(minLength: 0)
-
-            VStack(alignment: .leading, spacing: 4) {
-                StatusLine(text: model.lastSync.map { "全部来源已同步 · \($0.formatted("H:mm"))" } ?? "尚未同步")
-                if let error = model.loadError {
-                    Text(error).font(.system(size: 10)).foregroundStyle(.red).lineLimit(2)
-                }
-            }
-            .padding(.leading, 6)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 14)
-        .frame(maxHeight: .infinity, alignment: .top)
+    }
+}
+
+/// 「系统日历」下面的子列表：未授权时给出授权入口，授权后按账户列出每个日历，可单独开关。
+private struct SystemCalendarList: View {
+    @Bindable var model: CalendarModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            switch model.calendarAccess {
+            case .notDetermined:
+                hint("允许读取系统日历", systemImage: "lock.open") { model.actions.requestCalendarAccess() }
+            case .denied:
+                hint("在系统设置中允许访问日历", systemImage: "gearshape") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            case .granted:
+                if !model.systemCalendars.isEmpty {
+                    Button {
+                        model.systemCalendarsExpanded.toggle()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: model.systemCalendarsExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text("\(model.systemCalendars.count) 个日历")
+                        }
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 29)
+                    .frame(height: 20)
+                }
+                if model.systemCalendarsExpanded {
+                    ForEach(model.calendarsByAccount, id: \.account) { group in
+                        Text(group.account)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 29)
+                            .padding(.top, 4)
+                        ForEach(group.calendars) { cal in
+                            CalendarToggleRow(calendar: cal, isOn: !model.excludedCalendarIDs.contains(cal.id)) {
+                                model.setCalendar(cal.id, included: model.excludedCalendarIDs.contains(cal.id))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.bottom, 4)
+    }
+
+    private func hint(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 11))
+                .foregroundStyle(SourceKind.systemCalendar.color)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, 29)
+        .frame(height: 22)
+    }
+}
+
+private struct CalendarToggleRow: View {
+    let calendar: SystemCalendarInfo
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        let color = UInt32(calendar.colorHex.dropFirst(), radix: 16).map { Color(nsColor: NSColor(hex: $0)) }
+            ?? SourceKind.systemCalendar.color
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(isOn ? color : .clear)
+                    .strokeBorder(color, lineWidth: isOn ? 0 : 1.5)
+                    .frame(width: 9, height: 9)
+                Text(calendar.title)
+                    .foregroundStyle(isOn ? .primary : .secondary)
+                    .lineLimit(1)
+                Spacer()
+            }
+            .font(.system(size: 12))
+            .padding(.leading, 31)
+            .frame(height: 22)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 

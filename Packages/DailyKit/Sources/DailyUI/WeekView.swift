@@ -159,7 +159,7 @@ private struct EventBlock: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
-                Circle().fill(item.sourceKind.color).frame(width: 6, height: 6)
+                Circle().fill(item.displayColor).frame(width: 6, height: 6)
                 Text(item.title)
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
@@ -180,7 +180,7 @@ private struct EventBlock: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(item.sourceKind.tint))
+        .background(RoundedRectangle(cornerRadius: 6).fill(item.displayTint))
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .help(item.title)
     }
@@ -197,13 +197,13 @@ struct AllDayChip: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Circle().fill(item.sourceKind.color).frame(width: 6, height: 6)
+            Circle().fill(item.displayColor).frame(width: 6, height: 6)
             Text(item.title).lineLimit(1)
         }
         .font(.system(size: 11))
         .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 5).fill(item.sourceKind.tint))
+        .background(RoundedRectangle(cornerRadius: 5).fill(item.displayTint))
     }
 }
 

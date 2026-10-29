@@ -1,0 +1,22 @@
+import Foundation
+
+/// 存在 App Group 的 UserDefaults 里的用户设置，App 和 Widget 都能读到。
+public struct Preferences: Sendable {
+    public static let shared = Preferences(suiteName: AppGroup.identifier)
+
+    private let suiteName: String?
+
+    public init(suiteName: String?) {
+        self.suiteName = suiteName
+    }
+
+    private var defaults: UserDefaults {
+        suiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
+    }
+
+    /// 不同步的系统日历（EKCalendar.calendarIdentifier）。
+    public var excludedCalendarIDs: Set<String> {
+        get { Set(defaults.stringArray(forKey: "excludedCalendarIDs") ?? []) }
+        nonmutating set { defaults.set(newValue.sorted(), forKey: "excludedCalendarIDs") }
+    }
+}

@@ -15,6 +15,14 @@ func makeModel(now: Date? = nil) -> CalendarModel {
     try! DemoData.seed(store)
     let model = CalendarModel(store: store, now: { now ?? .now })
     model.lastSync = .now
+    model.calendarAccess = .granted
+    model.systemCalendars = [
+        SystemCalendarInfo(id: "home", title: "个人", accountName: "iCloud", colorHex: "#0F8B8D"),
+        SystemCalendarInfo(id: "family", title: "家庭", accountName: "iCloud", colorHex: "#FF9500"),
+        SystemCalendarInfo(id: "work", title: "社团", accountName: "Google", colorHex: "#AF52DE"),
+        SystemCalendarInfo(id: "holiday", title: "中国节假日", accountName: "其他", colorHex: "#34C759"),
+    ]
+    model.excludedCalendarIDs = ["holiday"]
     return model
 }
 

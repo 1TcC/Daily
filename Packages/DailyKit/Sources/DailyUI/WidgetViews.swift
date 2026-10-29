@@ -72,7 +72,7 @@ public struct TodayAgendaWidgetView: View {
         let current = snapshot.current?.id == item.id
         return HStack(spacing: 10) {
             RoundedRectangle(cornerRadius: 2)
-                .fill(item.sourceKind.color.opacity(past ? 0.35 : 1))
+                .fill(item.displayColor.opacity(past ? 0.35 : 1))
                 .frame(width: 4, height: 30)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title)
@@ -89,7 +89,7 @@ public struct TodayAgendaWidgetView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .background(RoundedRectangle(cornerRadius: 9).fill(current ? item.sourceKind.tint : .clear))
+        .background(RoundedRectangle(cornerRadius: 9).fill(current ? item.displayTint : .clear))
     }
 
     private var tomorrowText: String {
@@ -108,11 +108,11 @@ public struct NowNextWidgetView: View {
     public var body: some View {
         HStack(spacing: 16) {
             if let current = snapshot.current {
-                panel(label: "进行中", labelColor: current.sourceKind.color, item: current) {
+                panel(label: "进行中", labelColor: current.displayColor, item: current) {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule().fill(Color.primary.opacity(0.1))
-                            Capsule().fill(current.sourceKind.color)
+                            Capsule().fill(current.displayColor)
                                 .frame(width: geo.size.width * progress(current))
                         }
                     }

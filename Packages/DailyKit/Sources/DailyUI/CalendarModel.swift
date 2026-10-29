@@ -10,16 +10,33 @@ public enum ViewMode: String, CaseIterable, Identifiable, Sendable {
     public var id: Self { self }
 }
 
+/// 需要 App 层（同步、授权）处理的操作，由 App 注入，DailyUI 本身不管数据来源。
+@MainActor
+public struct CalendarActions {
+    public var requestCalendarAccess: () -> Void = {}
+    public var setCalendarIncluded: (_ calendarID: String, _ included: Bool) -> Void = { _, _ in }
+    /// 显示范围变了（翻页、切换视图），App 可以据此补同步该范围。
+    public var visibleRangeChanged: (DateInterval) -> Void = { _ in }
+    public init() {}
+}
+
 /// 主窗口的状态：当前显示的日期范围、隐藏的来源、从存储读出的条目。
 @MainActor @Observable
 public final class CalendarModel {
     public let store: ItemStore
     public let calendar: Calendar
-    public var mode: ViewMode = .week { didSet { reload() } }
-    public var anchorDate: Date { didSet { reload() } }
+    public var mode: ViewMode = .week { didSet { rangeDidChange() } }
+    public var anchorDate: Date { didSet { rangeDidChange() } }
     public var hiddenKinds: Set<SourceKind> = []
     public var lastSync: Date?
     public var showingInbox = false
+    public var actions = CalendarActions()
+
+    // 系统日历
+    public var calendarAccess: CalendarAccess = .notDetermined
+    public var systemCalendars: [SystemCalendarInfo] = []
+    public var excludedCalendarIDs: Set<String> = []
+    public var systemCalendarsExpanded = true
     public private(set) var items: [CalendarItem] = []
     public private(set) var pending: [CalendarItem] = []
     public private(set) var loadError: String?
@@ -42,6 +59,27 @@ public final class CalendarModel {
         } catch {
             loadError = String(describing: error)
         }
+    }
+
+    private func rangeDidChange() {
+        reload()
+        actions.visibleRangeChanged(visibleInterval)
+    }
+
+    public func setCalendar(_ id: String, included: Bool) {
+        if included { excludedCalendarIDs.remove(id) } else { excludedCalendarIDs.insert(id) }
+        actions.setCalendarIncluded(id, included)
+    }
+
+    /// 按账户分组的系统日历，保持账户出现的顺序。
+    public var calendarsByAccount: [(account: String, calendars: [SystemCalendarInfo])] {
+        var order: [String] = []
+        var groups: [String: [SystemCalendarInfo]] = [:]
+        for cal in systemCalendars {
+            if groups[cal.accountName] == nil { order.append(cal.accountName) }
+            groups[cal.accountName, default: []].append(cal)
+        }
+        return order.map { ($0, groups[$0]!) }
     }
 
     // MARK: - 日期范围

@@ -52,6 +52,18 @@ public extension SourceKind {
     }
 }
 
+public extension CalendarItem {
+    /// 系统日历条目沿用它在「日历」App 里的颜色，其他来源用来源色。
+    var displayColor: Color {
+        if let hex = metadata["color"], let value = UInt32(hex.dropFirst(), radix: 16), hex.count == 7 {
+            return Color(nsColor: NSColor(hex: value))
+        }
+        return sourceKind.color
+    }
+
+    var displayTint: Color { displayColor.opacity(0.14) }
+}
+
 enum Palette {
     static let today = Color(light: 0xFF3B30, dark: 0xFF453A)
     static let todayColumn = Color(light: 0xF5F8FF, dark: 0x1A1D24)

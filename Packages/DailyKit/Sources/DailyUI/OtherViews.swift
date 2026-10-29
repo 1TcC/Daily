@@ -38,7 +38,7 @@ struct AgendaRow: View {
                 .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 44, alignment: .trailing)
-            RoundedRectangle(cornerRadius: 2).fill(item.sourceKind.color).frame(width: 4, height: 30)
+            RoundedRectangle(cornerRadius: 2).fill(item.displayColor).frame(width: 4, height: 30)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title).font(.system(size: 13, weight: .semibold))
                 Text([item.location, item.sourceKind.displayName].compactMap { $0 }.joined(separator: " · "))
@@ -92,7 +92,7 @@ struct MonthView: View {
                 .background(Circle().fill(today ? Palette.today : .clear))
             ForEach(items.prefix(3)) { item in
                 HStack(spacing: 4) {
-                    Circle().fill(item.sourceKind.color).frame(width: 5, height: 5)
+                    Circle().fill(item.displayColor).frame(width: 5, height: 5)
                     Text(item.title).lineLimit(1)
                 }
                 .font(.system(size: 10))
