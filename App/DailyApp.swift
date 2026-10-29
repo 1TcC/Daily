@@ -120,6 +120,7 @@ struct DailyApp: App {
         }
         .defaultSize(width: 1200, height: 760)
         .commands {
+            TextSizeCommands(model: services.model)
             CommandMenu("数据") {
                 Button("立即同步") { Task { await services.syncNow() } }
                     .keyboardShortcut("r")
