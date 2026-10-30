@@ -2,135 +2,282 @@ import DailyKit
 import DailyUI
 import SwiftUI
 
-/// 仿 iOS「日历」：打开是月视图，点某天进入带周条的时间轴，左上角返回月份。
+/// 日历的可翻范围：前后各 100 年，用懒加载，实际等于翻不到头。下标固定，翻页只算偏移。
+enum CalendarRange {
+    static let calendar = Calendar.mondayFirst
+    static let today = calendar.startOfDay(for: .now)
+    static let thisMonth = monthStart(today)
+    static let thisYear = calendar.component(.year, from: today)
+    static let years = Array((thisYear - 100)...(thisYear + 100))
+    static let months: [Date] = (-1200...1200).compactMap { calendar.date(byAdding: .month, value: $0, to: thisMonth) }
+    static let firstDay = calendar.date(byAdding: .day, value: -36525, to: today)!
+    static let dayCount = 73050
+    static let firstWeek = calendar.startOfWeek(for: firstDay)
+    static let weekCount = dayCount / 7 + 1
+
+    static func monthStart(_ date: Date) -> Date {
+        calendar.date(from: calendar.dateComponents([.year, .month], from: date))!
+    }
+}
+
+/// 月视图的样式，和系统日历一样三种。
+enum MonthStyle: String, CaseIterable, Identifiable {
+    case compact, stacked, details
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .compact: "紧凑"
+        case .stacked: "叠放"
+        case .details: "详细信息"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .compact: "circle.grid.3x3"
+        case .stacked: "square.grid.3x3.middle.filled"
+        case .details: "rectangle.grid.1x2"
+        }
+    }
+
+    var rowHeight: CGFloat {
+        switch self {
+        case .compact: 62
+        case .stacked: 78
+        case .details: 96
+        }
+    }
+}
+
+/// 仿 iOS「日历」的三层：年 → 月 → 日，左上角逐层返回。打开时在当前月份。
 struct PhoneCalendarView: View {
     let services: PhoneServices
-    @State private var path: [Route] = []
-    @State private var selectedDay = Calendar.mondayFirst.startOfDay(for: .now)
+    @State private var path: [Route] = [.month]
+    @State private var selectedDay = CalendarRange.today
     /// 月视图滚动到的月份（当月 1 号）。
-    @State private var month: Date? = Calendar.mondayFirst.date(from: Calendar.mondayFirst.dateComponents([.year, .month], from: .now))
-    @State private var sheet: Sheet?
+    @State private var month: Date? = CalendarRange.thisMonth
+    /// 年视图滚动到的年份。
+    @State private var year: Int? = CalendarRange.thisYear
+    @AppStorage("monthStyle") private var monthStyle = MonthStyle.details
+    @State private var adding = false
     @State private var selectedItem: CalendarItem?
 
-    enum Route: Hashable { case day, list }
+    enum Route: Hashable { case month, day, list }
 
-    enum Sheet: String, Identifiable {
-        case add, parcels, settings
-        var id: String { rawValue }
-    }
+    private var cal: Calendar { services.calendar }
+    private var shownMonth: Date { month ?? CalendarRange.thisMonth }
 
     var body: some View {
         NavigationStack(path: $path) {
-            MonthScreen(services: services, month: $month) { day in
-                selectedDay = day
-                path = [.day]
+            YearScreen(services: services, year: $year) { picked in
+                month = picked
+                path = [.month]
             }
-            .toolbar { topBar(year: true) }
+            .toolbar { trailingBar }
             .navigationDestination(for: Route.self) { route in
-                Group {
-                    switch route {
-                    case .day:
-                        DayScreen(services: services, selectedDay: $selectedDay) { selectedItem = $0 }
-                    case .list:
-                        AgendaView(services: services) { selectedItem = $0 }
+                destination(route)
+                    .navigationBarBackButtonHidden()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) { backButton(route) }
+                        trailingBar
                     }
-                }
-                .navigationBarBackButtonHidden()
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            // 返回到正在看的那一天所在的月份
-                            month = monthStart(selectedDay)
-                            path = []
-                        } label: {
-                            HStack(spacing: 3) {
-                                Image(systemName: "chevron.left")
-                                Text(selectedDay.formatted("M月", calendar: services.calendar)).fixedSize()
-                            }
-                        }
-                    }
-                    topBar(year: false)
-                }
-                .toolbar { bottomBar }
-            }
-            .toolbar { bottomBar }
-        }
-        .tint(.red)
-        .sheet(item: $sheet) { sheet in
-            switch sheet {
-            case .add: AddEventView(services: services, start: defaultStart)
-            case .parcels: ParcelsView(services: services)
-            case .settings: PhoneSettingsView(services: services)
             }
         }
+        // 工具栏用黑白色，红色只留给「今天」，和系统日历一样不刺眼
+        .tint(.primary)
+        .sheet(isPresented: $adding) { AddEventView(services: services, start: defaultStart).tint(.red) }
         .sheet(item: $selectedItem) { item in
-            ScrollView { EventDetailView(item: item, calendar: services.calendar) }
+            ScrollView { EventDetailView(item: item, calendar: cal) }
                 .environment(\.markParcelPicked, { services.markPicked($0) })
                 .presentationDetents([.medium, .large])
         }
         #if DEBUG
         .onAppear {
-            // 模拟器截图用：-dailyScreen day / list
+            // 模拟器截图用：-dailyScreen year / day / list
             switch UserDefaults.standard.string(forKey: "dailyScreen") {
-            case "day": path = [.day]
-            case "list": path = [.list]
+            case "year": path = []
+            case "day": path = [.month, .day]
+            case "list": path = [.month, .list]
             default: break
             }
         }
         #endif
     }
 
-    private func monthStart(_ date: Date) -> Date {
-        let cal = services.calendar
-        return cal.date(from: cal.dateComponents([.year, .month], from: date))!
+    @ViewBuilder
+    private func destination(_ route: Route) -> some View {
+        switch route {
+        case .month:
+            MonthScreen(services: services, month: $month, style: monthStyle) { day in
+                selectedDay = day
+                path = [.month, .day]
+            }
+        case .day:
+            DayScreen(services: services, selectedDay: $selectedDay) { selectedItem = $0 }
+        case .list:
+            AgendaView(services: services) { selectedItem = $0 }
+        }
+    }
+
+    /// 月视图返回到年，日视图和列表返回到月。
+    private func backButton(_ route: Route) -> some View {
+        Button {
+            if route == .month {
+                year = cal.component(.year, from: shownMonth)
+                path = []
+            } else {
+                if route == .day { month = CalendarRange.monthStart(selectedDay) }
+                path = [.month]
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "chevron.left")
+                Text(route == .month ? shownMonth.formatted("yyyy年", calendar: cal)
+                                     : (route == .day ? selectedDay : shownMonth).formatted("M月", calendar: cal))
+                    .fixedSize()
+            }
+        }
+    }
+
+    /// 列表从正在看的地方开始：日视图是那一天，月视图是那个月（当月从今天）。
+    private func showList() {
+        let onDay = path.last == .day
+        let thisMonth = CalendarRange.monthStart(.now) == shownMonth
+        services.startDate = onDay ? selectedDay : (thisMonth ? cal.startOfDay(for: .now) : shownMonth)
+        path = [.month, .list]
     }
 
     /// 新建日程默认从选中那天开始：今天取下一个整点，别的日子取 9 点。
     private var defaultStart: Date {
-        let cal = services.calendar
-        if path.isEmpty || cal.isDateInToday(selectedDay) {
+        if path.last != .day || cal.isDateInToday(selectedDay) {
             return cal.nextDate(after: .now, matching: DateComponents(minute: 0), matchingPolicy: .nextTime) ?? .now
         }
         return cal.date(bySettingHour: 9, minute: 0, second: 0, of: selectedDay) ?? selectedDay
     }
 
     @ToolbarContentBuilder
-    private func topBar(year: Bool) -> some ToolbarContent {
-        if year {
-            ToolbarItem(placement: .topBarLeading) {
-                Text((month ?? .now).formatted("yyyy年", calendar: services.calendar))
-                    .font(.headline)
-                    .foregroundStyle(.red)
-                    .fixedSize()
+    private var trailingBar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("今天") {
+                let today = cal.startOfDay(for: .now)
+                selectedDay = today
+                withAnimation {
+                    month = CalendarRange.monthStart(today)
+                    year = cal.component(.year, from: today)
+                }
             }
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
-            if path != [.list] {
-                Button { path = [.list] } label: { Image(systemName: "list.bullet") }
-                    .accessibilityLabel("列表")
-            } else {
-                Button { path = [.day] } label: { Image(systemName: "calendar.day.timeline.left") }
+            if path.last == .list {
+                Button { path = [.month, .day] } label: { Image(systemName: "calendar.day.timeline.left") }
                     .accessibilityLabel("时间轴")
+            } else if path.last == .day {
+                Button { showList() } label: { Image(systemName: "list.bullet") }
+                    .accessibilityLabel("列表")
+            } else if !path.isEmpty {
+                // 月视图：和系统日历一样在这里切换样式
+                Menu {
+                    Picker("月视图样式", selection: $monthStyle) {
+                        ForEach(MonthStyle.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
+                    }
+                    Divider()
+                    Button { showList() } label: { Label("列表", systemImage: "list.bullet") }
+                } label: {
+                    Image(systemName: monthStyle.symbol)
+                }
+                .accessibilityLabel("月视图样式")
             }
-            Button { sheet = .add } label: { Image(systemName: "plus") }
+            Button { adding = true } label: { Image(systemName: "plus") }
                 .accessibilityLabel("新建日程")
         }
     }
+}
 
-    /// 底部和系统日历一样：今天、中间的收件箱（这里是待取件）、右边设置。
-    @ToolbarContentBuilder
-    private var bottomBar: some ToolbarContent {
-        ToolbarItemGroup(placement: .bottomBar) {
-            Button("今天") {
-                let today = services.calendar.startOfDay(for: .now)
-                selectedDay = today
-                withAnimation { month = monthStart(today) }
+// MARK: - 年视图
+
+/// 上下滚动的年份，每年 12 个小月历；点某个月进入月视图。
+private struct YearScreen: View {
+    let services: PhoneServices
+    @Binding var year: Int?
+    let onPick: (Date) -> Void
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(CalendarRange.years, id: \.self) { value in
+                    YearGrid(year: value, calendar: services.calendar, onPick: onPick)
+                }
             }
-            Spacer()
-            Button(services.pendingParcels.isEmpty ? "待取件" : "待取件 \(services.pendingParcels.count)") { sheet = .parcels }
-            Spacer()
-            Button("设置") { sheet = .settings }
+            .scrollTargetLayout()
         }
+        .scrollPosition(id: $year, anchor: .top)
+        .scrollIndicators(.hidden)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct YearGrid: View {
+    let year: Int
+    let calendar: Calendar
+    let onPick: (Date) -> Void
+
+    var body: some View {
+        let current = year == calendar.component(.year, from: .now)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(String(year))年")
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(current ? Color.red : .primary)
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
+            Divider()
+            ForEach(0..<4, id: \.self) { row in
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(1...3, id: \.self) { column in
+                        let month = calendar.date(from: DateComponents(year: year, month: row * 3 + column))!
+                        MiniMonth(month: month, calendar: calendar)
+                            .contentShape(Rectangle())
+                            .onTapGesture { onPick(month) }
+                    }
+                }
+                .padding(.horizontal, 14)
+            }
+        }
+        .padding(.bottom, 16)
+    }
+}
+
+/// 小月历：用 Canvas 画，滚动年份时不用创建几百个文字视图。
+private struct MiniMonth: View {
+    let month: Date
+    let calendar: Calendar
+
+    var body: some View {
+        let current = calendar.isDate(month, equalTo: .now, toGranularity: .month)
+        VStack(alignment: .leading, spacing: 3) {
+            Text("\(calendar.component(.month, from: month))月")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(current ? Color.red : .primary)
+            Canvas { context, size in
+                let days = calendar.range(of: .day, in: .month, for: month)?.count ?? 30
+                let lead = (calendar.component(.weekday, from: month) - calendar.firstWeekday + 7) % 7
+                let todayNumber = current ? calendar.component(.day, from: .now) : 0
+                let w = size.width / 7, h = size.height / 6
+                for day in 1...days {
+                    let index = lead + day - 1
+                    let center = CGPoint(x: w * (CGFloat(index % 7) + 0.5), y: h * (CGFloat(index / 7) + 0.5))
+                    if day == todayNumber {
+                        let r = min(w, h) * 0.55
+                        context.fill(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)),
+                                     with: .color(.red))
+                    }
+                    context.draw(Text("\(day)").font(.system(size: 9, weight: day == todayNumber ? .semibold : .regular))
+                        .foregroundColor(day == todayNumber ? .white : .primary), at: center)
+                }
+            }
+            .frame(height: 78)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -140,14 +287,8 @@ struct PhoneCalendarView: View {
 private struct MonthScreen: View {
     let services: PhoneServices
     @Binding var month: Date?
+    let style: MonthStyle
     let onSelect: (Date) -> Void
-
-    private var cal: Calendar { services.calendar }
-    /// 前 6 个月到后 12 个月。
-    private var months: [Date] {
-        let first = cal.date(from: cal.dateComponents([.year, .month], from: .now))!
-        return (-6...12).compactMap { cal.date(byAdding: .month, value: $0, to: first) }
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -163,8 +304,8 @@ private struct MonthScreen: View {
             Divider()
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(months, id: \.self) { month in
-                        MonthGrid(services: services, month: month, onSelect: onSelect)
+                    ForEach(CalendarRange.months, id: \.self) { month in
+                        MonthGrid(services: services, month: month, style: style, onSelect: onSelect)
                     }
                 }
                 .scrollTargetLayout()
@@ -179,6 +320,7 @@ private struct MonthScreen: View {
 private struct MonthGrid: View {
     let services: PhoneServices
     let month: Date
+    let style: MonthStyle
     let onSelect: (Date) -> Void
 
     private var cal: Calendar { services.calendar }
@@ -212,7 +354,7 @@ private struct MonthGrid: View {
                     HStack(alignment: .top, spacing: 0) {
                         ForEach(0..<7, id: \.self) { column in
                             if let day = weeks[index][column] {
-                                DayCell(day: day, items: services.items(on: day), calendar: cal)
+                                DayCell(day: day, items: services.items(on: day), calendar: cal, style: style)
                                     .contentShape(Rectangle())
                                     .onTapGesture { onSelect(day) }
                             } else {
@@ -221,7 +363,7 @@ private struct MonthGrid: View {
                         }
                     }
                 }
-                .frame(height: 96)
+                .frame(height: style.rowHeight)
             }
         }
         .padding(.bottom, 10)
@@ -232,6 +374,8 @@ private struct DayCell: View {
     let day: Date
     let items: [CalendarItem]
     let calendar: Calendar
+    let style: MonthStyle
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let today = calendar.isDateInToday(day)
@@ -249,15 +393,41 @@ private struct DayCell: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .frame(height: 10)
+            content
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .clipped()
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch style {
+        case .compact:
+            // 紧凑：有安排就显示一个小圆点
+            if !items.isEmpty {
+                Circle().fill(Color.secondary).frame(width: 5, height: 5).padding(.top, 2)
+            }
+        case .stacked:
+            // 叠放：每项一条色带，不写字
+            VStack(spacing: 2) {
+                ForEach(items.prefix(4)) { item in
+                    RoundedRectangle(cornerRadius: 1.5).fill(item.eventBar(scheme)).frame(height: 5)
+                }
+            }
+            .padding(.horizontal, 5)
+            .padding(.top, 2)
+        case .details:
+            // 详细信息：写出日程名称
             VStack(spacing: 1) {
                 ForEach(items.prefix(3)) { item in
                     Text(item.title)
                         .font(.system(size: 9, weight: .medium))
                         .lineLimit(1)
-                        .foregroundStyle(item.displayColor)
+                        .foregroundStyle(item.eventText(scheme))
                         .padding(.horizontal, 2)
                         .frame(maxWidth: .infinity, minHeight: 12, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 2).fill(item.displayColor.opacity(0.16)))
+                        .background(RoundedRectangle(cornerRadius: 2).fill(item.eventFill(scheme)))
                 }
                 if items.count > 3 {
                     Text("+\(items.count - 3)")
@@ -266,10 +436,7 @@ private struct DayCell: View {
                 }
             }
             .padding(.horizontal, 1)
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .clipped()
     }
 }
 
@@ -282,40 +449,47 @@ private struct DayScreen: View {
     let onOpen: (CalendarItem) -> Void
 
     private var cal: Calendar { services.calendar }
-    /// 可翻的范围：今天前后。
-    private var base: Date { cal.date(byAdding: .day, value: -180, to: cal.startOfDay(for: .now))! }
-    private let dayCount = 540
 
-    private var dayIndex: Binding<Int> {
-        Binding(
-            get: { cal.dateComponents([.day], from: base, to: selectedDay).day ?? 0 },
-            set: { selectedDay = cal.date(byAdding: .day, value: $0, to: base) ?? selectedDay }
-        )
+    private func offset(from start: Date) -> Int {
+        cal.dateComponents([.day], from: start, to: selectedDay).day ?? 0
     }
 
-    private var weekIndex: Binding<Int> {
+    private var dayIndex: Binding<Int?> {
         Binding(
-            get: { (cal.dateComponents([.day], from: firstWeek, to: selectedDay).day ?? 0) / 7 },
-            set: { week in
-                // 换周时保持星期几不变
-                let offset = (cal.dateComponents([.day], from: firstWeek, to: selectedDay).day ?? 0) % 7
-                selectedDay = cal.date(byAdding: .day, value: week * 7 + offset, to: firstWeek) ?? selectedDay
+            get: { offset(from: CalendarRange.firstDay) },
+            set: { index in
+                if let index { selectedDay = cal.date(byAdding: .day, value: index, to: CalendarRange.firstDay) ?? selectedDay }
             }
         )
     }
 
-    private var firstWeek: Date { cal.startOfWeek(for: base) }
+    private var weekIndex: Binding<Int?> {
+        Binding(
+            get: { offset(from: CalendarRange.firstWeek) / 7 },
+            set: { week in
+                // 换周时保持星期几不变
+                guard let week, week != offset(from: CalendarRange.firstWeek) / 7 else { return }
+                let weekday = offset(from: CalendarRange.firstWeek) % 7
+                selectedDay = cal.date(byAdding: .day, value: week * 7 + weekday, to: CalendarRange.firstWeek) ?? selectedDay
+            }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            TabView(selection: weekIndex) {
-                ForEach(0..<(dayCount / 7 + 1), id: \.self) { week in
-                    WeekStrip(week: cal.date(byAdding: .day, value: week * 7, to: firstWeek)!, selected: selectedDay,
-                              calendar: cal) { selectedDay = $0 }
-                        .tag(week)
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    ForEach(0..<CalendarRange.weekCount, id: \.self) { week in
+                        WeekStrip(week: cal.date(byAdding: .day, value: week * 7, to: CalendarRange.firstWeek)!,
+                                  selected: selectedDay, calendar: cal) { selectedDay = $0 }
+                            .containerRelativeFrame(.horizontal)
+                    }
                 }
+                .scrollTargetLayout()
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: weekIndex)
+            .scrollIndicators(.hidden)
             .frame(height: 58)
 
             Text("\(selectedDay.formatted("yyyy年M月d日 EEEE", calendar: cal))  \(Lunar.dayText(selectedDay))")
@@ -324,14 +498,19 @@ private struct DayScreen: View {
                 .padding(.bottom, 6)
             Divider()
 
-            TabView(selection: dayIndex) {
-                ForEach(0..<dayCount, id: \.self) { index in
-                    let day = cal.date(byAdding: .day, value: index, to: base)!
-                    DayTimeline(day: day, items: services.items(on: day), calendar: cal, onOpen: onOpen)
-                        .tag(index)
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    ForEach(0..<CalendarRange.dayCount, id: \.self) { index in
+                        let day = cal.date(byAdding: .day, value: index, to: CalendarRange.firstDay)!
+                        DayTimeline(day: day, items: services.items(on: day), calendar: cal, onOpen: onOpen)
+                            .containerRelativeFrame([.horizontal, .vertical])
+                    }
                 }
+                .scrollTargetLayout()
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: dayIndex)
+            .scrollIndicators(.hidden)
         }
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -343,6 +522,8 @@ private struct WeekStrip: View {
     let calendar: Calendar
     let onSelect: (Date) -> Void
 
+    private let names = ["一", "二", "三", "四", "五", "六", "日"]
+
     var body: some View {
         HStack(spacing: 0) {
             ForEach(0..<7, id: \.self) { offset in
@@ -350,12 +531,12 @@ private struct WeekStrip: View {
                 let isToday = calendar.isDateInToday(day)
                 let isSelected = calendar.isDate(day, inSameDayAs: selected)
                 VStack(spacing: 3) {
-                    Text(day.formatted("EEEEE", calendar: calendar))
+                    Text(names[offset])
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     Text("\(calendar.component(.day, from: day))")
                         .font(.system(size: 17, weight: isSelected ? .semibold : .regular))
-                        .foregroundStyle(isSelected ? Color.white : (isToday ? Color.red : Color.primary))
+                        .foregroundStyle(isSelected ? AnyShapeStyle(.background) : (isToday ? AnyShapeStyle(.red) : AnyShapeStyle(.primary)))
                         .frame(width: 32, height: 32)
                         .background(Circle().fill(isSelected ? (isToday ? Color.red : Color.primary) : .clear))
                 }
@@ -373,6 +554,7 @@ private struct DayTimeline: View {
     let items: [CalendarItem]
     let calendar: Calendar
     let onOpen: (CalendarItem) -> Void
+    @Environment(\.colorScheme) private var scheme
 
     private let hourHeight: CGFloat = 54
     private let gutter: CGFloat = 52
@@ -395,11 +577,11 @@ private struct DayTimeline: View {
                     ForEach(allDay) { item in
                         Text(item.title)
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(item.displayColor)
+                            .foregroundStyle(item.eventText(scheme))
                             .lineLimit(1)
                             .padding(.horizontal, 6)
                             .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
-                            .background(RoundedRectangle(cornerRadius: 4).fill(item.displayColor.opacity(0.16)))
+                            .background(RoundedRectangle(cornerRadius: 4).fill(item.eventFill(scheme)))
                             .contentShape(Rectangle())
                             .onTapGesture { onOpen(item) }
                     }
@@ -491,6 +673,7 @@ private struct TimelineEvent: View {
     let item: CalendarItem
     let height: CGFloat
     let calendar: Calendar
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -502,15 +685,15 @@ private struct TimelineEvent: View {
                     .lineLimit(height < 70 ? 1 : 2)
             }
         }
-        .foregroundStyle(item.displayColor)
+        .foregroundStyle(item.eventText(scheme))
         .padding(.leading, 9)
         .padding(.trailing, 4)
         .padding(.vertical, 3)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(alignment: .leading) {
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 5).fill(item.displayColor.opacity(0.16))
-                RoundedRectangle(cornerRadius: 1.5).fill(item.displayColor).frame(width: 3).padding(.vertical, 3).padding(.leading, 2)
+                RoundedRectangle(cornerRadius: 5).fill(item.eventFill(scheme))
+                RoundedRectangle(cornerRadius: 1.5).fill(item.eventBar(scheme)).frame(width: 3).padding(.vertical, 3).padding(.leading, 2)
             }
         }
         .contentShape(Rectangle())

@@ -63,7 +63,14 @@ struct PhoneRootView: View {
         if services.connection == nil {
             ConnectView(services: services)
         } else {
-            PhoneCalendarView(services: services)
+            // 系统标签栏：iOS 26 起是液态玻璃，选中的胶囊可以按住左右拖
+            TabView {
+                Tab("日历", systemImage: "calendar") { PhoneCalendarView(services: services) }
+                Tab("待取件", systemImage: "shippingbox") { ParcelsView(services: services) }
+                    .badge(services.pendingParcels.count)
+                Tab("设置", systemImage: "gearshape") { PhoneSettingsView(services: services) }
+            }
+            .tint(.red)
         }
     }
 }

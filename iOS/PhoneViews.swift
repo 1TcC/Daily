@@ -56,6 +56,7 @@ private struct DayHeader: View {
 struct PhoneEventRow: View {
     let item: CalendarItem
     let calendar: Calendar
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         HStack(spacing: 12) {
@@ -67,7 +68,7 @@ struct PhoneEventRow: View {
             }
             .font(.footnote.monospacedDigit())
             .frame(width: 44, alignment: .trailing)
-            RoundedRectangle(cornerRadius: 2).fill(item.displayColor).frame(width: 4)
+            RoundedRectangle(cornerRadius: 2).fill(item.eventBar(scheme)).frame(width: 4)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title).font(.body.weight(.semibold)).lineLimit(2)
                 let detail = [item.location, item.metadata["pickupCode"].map { "取件码 \($0)" },
@@ -85,7 +86,6 @@ struct PhoneEventRow: View {
 /// 待取件：大号取件码，取完点「已取」（Mac 和小组件同步消失）。
 struct ParcelsView: View {
     let services: PhoneServices
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         let cal = services.calendar
@@ -108,19 +108,14 @@ struct ParcelsView: View {
                         Spacer()
                         Button("已取") { services.markPicked(parcel) }
                             .buttonStyle(.bordered)
-                            .tint(.green)
                     }
                     .swipeActions {
-                        Button("已取") { services.markPicked(parcel) }.tint(.green)
+                        Button("已取") { services.markPicked(parcel) }.tint(SourceKind.parcel.color)
                     }
                 }
             }
             .refreshable { await services.syncNow() }
             .navigationTitle("待取件")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
-            }
         }
     }
 }

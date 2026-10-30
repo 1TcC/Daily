@@ -210,15 +210,20 @@ final class PhoneServices {
         days = result
         pendingParcels = (try? store.pendingParcels(now: now)) ?? []
 
+        // 不限于同步范围：本地存着的都显示，翻到多久以前都能看到当时同步过的日程
         var byDay: [Date: [CalendarItem]] = [:]
-        for item in (try? store.items(in: syncRange)) ?? [] {
+        let wide = DateInterval(start: calendar.date(byAdding: .year, value: -20, to: now)!,
+                                end: calendar.date(byAdding: .year, value: 20, to: now)!)
+        for item in (try? store.items(in: wide)) ?? [] {
             var day = calendar.startOfDay(for: item.start)
-            // 全天日程的结束是次日零点（不含）；跨午夜的定时日程每天都画一段
+            // 全天日程的结束是次日零点（不含）；跨午夜的定时日程每天都画一段；单条最多展开 62 天
             let last = item.isAllDay ? item.effectiveEnd.addingTimeInterval(-1) : item.effectiveEnd
+            var count = 0
             repeat {
                 byDay[day, default: []].append(item)
                 day = calendar.date(byAdding: .day, value: 1, to: day)!
-            } while day <= last && byDay.count < 400
+                count += 1
+            } while day <= last && count < 62
         }
         itemsByDay = byDay
     }

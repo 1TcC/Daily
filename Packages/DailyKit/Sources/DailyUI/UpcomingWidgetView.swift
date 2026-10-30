@@ -209,6 +209,7 @@ private struct DayStack: View {
 private struct EventCard: View {
     let item: CalendarItem
     private let cal = Calendar.mondayFirst
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -221,7 +222,7 @@ private struct EventCard: View {
                 .lineLimit(1)
         }
         // 和系统日历一样，文字用日程本身的颜色
-        .foregroundStyle(item.displayColor)
+        .foregroundStyle(item.eventText(scheme))
         .padding(.vertical, 2.5)
         .padding(.leading, 9)
         .padding(.trailing, 5)
@@ -229,8 +230,8 @@ private struct EventCard: View {
         // 色条放在背景里，不参与布局，卡片高度固定
         .background(alignment: .leading) {
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 5).fill(item.displayColor.opacity(0.11))
-                RoundedRectangle(cornerRadius: 1.5).fill(item.displayColor).frame(width: 3)
+                RoundedRectangle(cornerRadius: 5).fill(item.eventFill(scheme))
+                RoundedRectangle(cornerRadius: 1.5).fill(item.eventBar(scheme)).frame(width: 3)
                     .padding(.vertical, 4).padding(.leading, 3)
             }
         }

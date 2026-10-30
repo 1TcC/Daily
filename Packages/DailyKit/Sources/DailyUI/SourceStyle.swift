@@ -89,6 +89,23 @@ public extension CalendarItem {
     }
 
     var displayTint: Color { displayColor.opacity(0.14) }
+
+    // 系统日历的配色：底色很淡，文字是压暗（深色模式下提亮）的日程颜色，不用原色铺满
+
+    /// 日程文字。
+    func eventText(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? displayColor.mix(with: .white, by: 0.32) : displayColor.mix(with: .black, by: 0.42)
+    }
+
+    /// 日程底色。
+    func eventFill(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? displayColor.mix(with: .black, by: 0.45).opacity(0.42) : displayColor.opacity(0.12)
+    }
+
+    /// 日程左侧的色条。
+    func eventBar(_ scheme: ColorScheme) -> Color {
+        displayColor.mix(with: scheme == .dark ? .black : .white, by: 0.12)
+    }
 }
 
 enum Palette {

@@ -6,7 +6,6 @@ import SwiftUI
 struct PhoneSettingsView: View {
     @Bindable var services: PhoneServices
     @Environment(\.openURL) private var openURL
-    @Environment(\.dismiss) private var dismiss
 
     private let leadOptions = [0, 30, 60, 90, 120, 180]
     private let dayOptions = [0, 1, 2, 3, 7]
@@ -85,10 +84,6 @@ struct PhoneSettingsView: View {
             }
             .environment(\.locale, Locale(identifier: "zh_CN"))
             .navigationTitle("设置")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
-            }
         }
     }
 
