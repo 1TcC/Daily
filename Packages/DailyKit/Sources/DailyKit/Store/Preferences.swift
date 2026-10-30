@@ -26,6 +26,12 @@ public struct Preferences: Sendable {
         nonmutating set { defaults.set(newValue, forKey: "systemCalendarsExpanded") }
     }
 
+    /// 中转服务的手机直连域名（Pages 网关），见 `RelayConnection.publicHost`。
+    public var relayPublicHost: String? {
+        get { defaults.string(forKey: "relayPublicHost") }
+        nonmutating set { defaults.set(newValue, forKey: "relayPublicHost") }
+    }
+
     /// 教务系统网址（导入课表时打开）。
     public var courseSiteURL: String {
         get { defaults.string(forKey: "courseSiteURL") ?? "https://classes.tju.edu.cn/eams/homeExt.action" }

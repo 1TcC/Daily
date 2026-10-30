@@ -1,0 +1,9 @@
+# Daily 网关：Cloudflare Pages 项目，只把请求原样转给 daily-relay Worker。
+# 用途：Pages 支持在外部 DNS（阿里云）用 CNAME 绑定子域名，而 workers.dev 在国内直连不稳定。
+name = "daily-gateway"
+pages_build_output_dir = "public"
+compatibility_date = "2025-09-01"
+
+[[services]]
+binding = "RELAY"
+service = "daily-relay"

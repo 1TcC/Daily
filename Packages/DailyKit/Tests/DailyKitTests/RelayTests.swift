@@ -113,3 +113,13 @@ import Testing
         #expect(t?.metadata["gate"] == "B12")
     }
 }
+
+@Suite struct RelayPublicHostTests {
+    @Test func publicHostOnlyAffectsPhoneURLs() {
+        var c = RelayConnection(string: "https://daily-relay.x.workers.dev/s3cret")!
+        c.publicHost = "daily.example.com"
+        #expect(c.smsIngestURL.absoluteString == "https://daily.example.com/ingest/e0b624ff1575031677630b7eec898d4a/sms")
+        #expect(c.calendarFeedURL.absoluteString == "webcal://daily.example.com/feed/9e91f2a37b08f0d4dfe713d93a471d83/daily.ics")
+        #expect(c.mcpURL.absoluteString == "https://daily-relay.x.workers.dev/s3cret/mcp")
+    }
+}

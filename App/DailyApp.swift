@@ -93,7 +93,13 @@ final class AppServices {
     func handle(_ url: URL) {
         guard url.scheme == "daily", url.host == "relay",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return }
-        if let what = items.first(where: { $0.name == "copy" })?.value, let relay = model.relay {
+        if let host = items.first(where: { $0.name == "public-host" })?.value {
+            // 设置手机直连域名：daily://relay?public-host=daily.0netc.com（空值表示取消）
+            Preferences.shared.relayPublicHost = host.isEmpty ? nil : host
+            if let saved = Keychain.string(for: Self.relayAccount), let connection = RelayConnection(string: saved) {
+                Task { await connectRelay(connection, syncNow: false) }
+            }
+        } else if let what = items.first(where: { $0.name == "copy" })?.value, let relay = model.relay {
             // 生成快捷指令时由脚本调用：把只写的短信地址（或只读订阅地址）放进剪贴板
             let url: URL? = switch what {
             case "sms-ingest": relaySource?.client.connection.smsIngestURL
@@ -114,6 +120,8 @@ final class AppServices {
     }
 
     private func connectRelay(_ connection: RelayConnection, syncNow: Bool) async {
+        var connection = connection
+        connection.publicHost = Preferences.shared.relayPublicHost
         let source = AgentRelaySource(client: RelayClient(connection: connection))
         relaySource = source
         lastSnapshotBody = nil

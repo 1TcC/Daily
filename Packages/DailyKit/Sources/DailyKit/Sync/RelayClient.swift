@@ -5,6 +5,9 @@ import Foundation
 /// Grok 用 `mcpURL` 作为自定义连接器地址；Daily 用同步端点拉取 / 上传。
 public struct RelayConnection: Sendable, Equatable {
     public let baseURL: URL
+    /// 手机直连用的域名（例如绑定在 Pages 网关上的 daily.0netc.com）。
+    /// workers.dev 在国内直连不稳定，短信投递和 iPhone 订阅地址优先用它。
+    public var publicHost: String?
 
     public init?(string: String) {
         var text = string.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -27,17 +30,26 @@ public struct RelayConnection: Sendable, Equatable {
     private var secret: String { baseURL.lastPathComponent }
     private var origin: URL { baseURL.deletingLastPathComponent() }
 
+    /// 手机用的地址根：设置了 publicHost 时换成它。
+    private var publicOrigin: URL {
+        guard let publicHost, var components = URLComponents(url: origin, resolvingAgainstBaseURL: false) else { return origin }
+        components.scheme = "https"
+        components.host = publicHost
+        components.port = nil
+        return components.url ?? origin
+    }
+
     /// 由主密钥派生的单一用途令牌：sha256("<密钥>:<用途>") 的前 32 位十六进制。
     func derivedToken(_ purpose: String) -> String {
         SHA256.hash(data: Data("\(secret):\(purpose)".utf8)).map { String(format: "%02x", $0) }.joined().prefix(32).description
     }
 
     /// iPhone 快捷指令投递短信用的地址：只能写入，拿到它也读不到任何数据。
-    public var smsIngestURL: URL { origin.appendingPathComponent("ingest/\(derivedToken("ingest"))/sms") }
+    public var smsIngestURL: URL { publicOrigin.appendingPathComponent("ingest/\(derivedToken("ingest"))/sms") }
 
     /// 只读的 iCalendar 订阅地址（webcal://），供 iPhone「日历」订阅。
     public var calendarFeedURL: URL {
-        var components = URLComponents(url: origin.appendingPathComponent("feed/\(derivedToken("feed"))/daily.ics"),
+        var components = URLComponents(url: publicOrigin.appendingPathComponent("feed/\(derivedToken("feed"))/daily.ics"),
                                        resolvingAgainstBaseURL: false)!
         components.scheme = "webcal"
         return components.url!
