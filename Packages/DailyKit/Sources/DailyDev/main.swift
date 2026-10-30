@@ -78,6 +78,42 @@ func render(_ view: some View, size: NSSize, dark: Bool, to path: String) {
     print("saved \(path)")
 }
 
+/// 「接下来几天」三种尺寸。
+struct UpcomingGallery: View {
+    let snapshot: WidgetSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            HStack(alignment: .top, spacing: 24) {
+                card(UpcomingWidgetView(snapshot: snapshot, layout: .medium), width: 364, height: 170)
+                card(UpcomingWidgetView(snapshot: snapshot, layout: .large), width: 364, height: 382)
+            }
+            card(UpcomingWidgetView(snapshot: snapshot, layout: .extraLarge), width: 772, height: 382)
+        }
+        .padding(34)
+        .background(Color(red: 0.16, green: 0.17, blue: 0.2))
+    }
+
+    private func card(_ content: some View, width: CGFloat, height: CGFloat) -> some View {
+        content
+            .padding(16)
+            .frame(width: width, height: height, alignment: .topLeading)
+            .background(RoundedRectangle(cornerRadius: 22).fill(Color(nsColor: .windowBackgroundColor)))
+    }
+}
+
+if let i = args.firstIndex(of: "--upcoming"), i + 1 < args.count {
+    MainActor.assumeIsolated {
+        app.setActivationPolicy(.prohibited)
+        let store = try! ItemStore.inMemory()
+        try! DemoData.seed(store)
+        let snapshot = try! WidgetSnapshot.load(from: store, now: fixedNow ?? .now)
+        render(UpcomingGallery(snapshot: snapshot), size: NSSize(width: 840, height: 1060),
+               dark: args.contains("--dark"), to: args[i + 1])
+    }
+    exit(0)
+}
+
 if let i = args.firstIndex(of: "--widgets"), i + 1 < args.count {
     MainActor.assumeIsolated {
         app.setActivationPolicy(.prohibited)

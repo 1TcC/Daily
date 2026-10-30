@@ -1,5 +1,17 @@
 import Foundation
 
+/// 某一天的安排（「接下来几天」小组件用）。
+public struct DayAgenda: Sendable, Identifiable {
+    public var date: Date
+    public var items: [CalendarItem]
+    public var id: Date { date }
+
+    public init(date: Date, items: [CalendarItem]) {
+        self.date = date
+        self.items = items
+    }
+}
+
 /// 小组件一次刷新所需的全部数据，由 Widget 的 TimelineProvider 从存储读取。
 public struct WidgetSnapshot: Sendable {
     public var date: Date
@@ -13,6 +25,8 @@ public struct WidgetSnapshot: Sendable {
     public var subscriptionCount: Int
     public var nextRenewal: (subscription: Subscription, date: Date)?
     public var pendingCount: Int
+    /// 从今天起 7 天的安排；今天只保留还没结束的。
+    public var days: [DayAgenda] = []
 
     /// 正在进行的条目。
     public var current: CalendarItem? {
@@ -40,6 +54,19 @@ public struct WidgetSnapshot: Sendable {
             .compactMap { sub in sub.nextRenewal(after: now, calendar: calendar).map { (sub, $0) } }
             .min { $0.1 < $1.1 }
 
+        var days: [DayAgenda] = []
+        for offset in 0..<7 {
+            let start = calendar.date(byAdding: .day, value: offset, to: dayStart)!
+            let end = calendar.date(byAdding: .day, value: 1, to: start)!
+            let items = try store.items(in: DateInterval(start: start, end: end)).filter { item in
+                // 全天日程的结束是「次日零点」（不含），不能算到下一天；定时日程只算当天开始的；
+                // 今天已经结束的不再占位置
+                let onDay = item.isAllDay ? item.effectiveEnd > start : item.start >= start
+                return onDay && (offset > 0 || item.isAllDay || item.effectiveEnd > now)
+            }
+            days.append(DayAgenda(date: start, items: items))
+        }
+
         return WidgetSnapshot(
             date: now,
             today: today,
@@ -49,7 +76,8 @@ public struct WidgetSnapshot: Sendable {
             monthlySubscriptionCost: subs.reduce(0) { $0 + $1.monthlyCost },
             subscriptionCount: subs.count,
             nextRenewal: nextRenewal.map { (subscription: $0.0, date: $0.1) },
-            pendingCount: try store.pendingItems().count
+            pendingCount: try store.pendingItems().count,
+            days: days
         )
     }
 

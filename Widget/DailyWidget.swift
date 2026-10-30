@@ -79,9 +79,36 @@ struct TripWidget: Widget {
     }
 }
 
+/// 仿系统「日历」小组件：今天 + 接下来几天，有中号（长条）、大号、超大号。
+struct UpcomingWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "upcoming", provider: SnapshotProvider()) { entry in
+            UpcomingEntryView(snapshot: entry.snapshot)
+                .containerBackground(.background, for: .widget)
+        }
+        .configurationDisplayName("接下来几天")
+        .description("今天和之后几天的安排，按日期分组。")
+        .supportedFamilies([.systemMedium, .systemLarge, .systemExtraLarge])
+    }
+}
+
+private struct UpcomingEntryView: View {
+    let snapshot: WidgetSnapshot
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        switch family {
+        case .systemLarge: UpcomingWidgetView(snapshot: snapshot, layout: .large)
+        case .systemExtraLarge: UpcomingWidgetView(snapshot: snapshot, layout: .extraLarge)
+        default: UpcomingWidgetView(snapshot: snapshot, layout: .medium)
+        }
+    }
+}
+
 @main
 struct DailyWidgetBundle: WidgetBundle {
     var body: some Widget {
+        UpcomingWidget()
         TodayWidget()
         NowNextWidget()
         SubscriptionWidget()
