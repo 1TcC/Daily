@@ -16,6 +16,8 @@ public struct RelayStatus: Sendable {
     public var mcpURL: URL
     public var lastSync: Date?
     public var error: String?
+    /// 实时推送连接是否在线。
+    public var isLive = false
 
     public init(mcpURL: URL, lastSync: Date? = nil, error: String? = nil) {
         self.mcpURL = mcpURL
@@ -30,6 +32,8 @@ public struct CalendarActions {
     public var requestCalendarAccess: () -> Void = {}
     public var setCalendarIncluded: (_ calendarID: String, _ included: Bool) -> Void = { _, _ in }
     public var disconnectRelay: () -> Void = {}
+    /// 同步全部来源（工具栏刷新按钮）。
+    public var refresh: () -> Void = {}
     public var syncRelay: () -> Void = {}
     /// 从教务系统导入了新课表。
     public var importCourseSchedule: (CourseSchedule) -> Void = { _ in }
@@ -49,6 +53,7 @@ public final class CalendarModel {
     public var lastSync: Date?
     public var showingInbox = false
     public var showingCourseImport = false
+    public var isSyncing = false
     /// 已连接 Grok 中转服务时非空。
     public var relay: RelayStatus?
     /// 已导入的课表，用于侧边栏摘要和显示教学周。

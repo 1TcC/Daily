@@ -87,6 +87,15 @@ public struct MainWindowView: View {
             .frame(width: 200)
         }
         ToolbarItemGroup(placement: .primaryAction) {
+            Button { model.actions.refresh() } label: {
+                Image(systemName: "arrow.clockwise")
+                    .rotationEffect(.degrees(model.isSyncing ? 360 : 0))
+                    .animation(model.isSyncing ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default,
+                               value: model.isSyncing)
+            }
+            .help("刷新：同步全部来源（⌘R）")
+            .keyboardShortcut("r", modifiers: .command)
+            .disabled(model.isSyncing)
             Button { } label: { Image(systemName: "magnifyingglass") }.help("搜索")
             Button { } label: { Image(systemName: "plus") }.help("新建日程")
         }

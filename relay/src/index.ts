@@ -7,9 +7,19 @@ interface DurableObjectStorageLike {
   get<T>(key: string): Promise<T | undefined>;
   put(key: string, value: unknown): Promise<void>;
 }
+interface WebSocketLike {
+  send(message: string): void;
+  close(code?: number, reason?: string): void;
+}
 interface DurableObjectStateLike {
   storage: DurableObjectStorageLike;
+  // WebSocket 休眠 API：空闲连接不计运行时长
+  acceptWebSocket(ws: WebSocketLike): void;
+  getWebSockets(): WebSocketLike[];
+  setWebSocketAutoResponse(pair: unknown): void;
 }
+declare const WebSocketPair: { new (): Record<string, WebSocketLike> };
+declare const WebSocketRequestResponsePair: { new (request: string, response: string): unknown };
 interface DurableObjectStubLike {
   fetch(request: Request): Promise<Response>;
 }
@@ -109,6 +119,8 @@ export default {
     const stub = env.STORE.get(env.STORE.idFromName("default"));
     const inner = new Request("https://store" + rest + url.search, request);
     const resp = await stub.fetch(inner);
+    // WebSocket 握手响应要原样返回，复制会丢掉 webSocket 字段
+    if (resp.status === 101) return resp;
     const out = new Response(resp.body, resp);
     for (const [k, v] of Object.entries(CORS)) out.headers.set(k, v);
     return out;
@@ -351,6 +363,8 @@ export class DailyStore {
   private clock: Clock;
   constructor(private state: DurableObjectStateLike, env: Env) {
     this.clock = new Clock(env.UTC_OFFSET);
+    // Daily 的心跳 "ping" 由运行时直接回 "pong"，不唤醒 DO
+    this.state.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -364,6 +378,15 @@ export class DailyStore {
       if (method !== "GET") return new Response(null, { status: 405, headers: { Allow: "GET" } });
       const agent = await this.loadAgent();
       return json({ events: Object.values(agent), now: this.clock.format(Date.now()) });
+    }
+    if (path === "/sync/live") {
+      // Daily 保持的长连接：Grok 改了日程就推一条通知，Daily 收到后立即拉取
+      if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+        return new Response("expected websocket", { status: 426 });
+      }
+      const [client, server] = Object.values(new WebSocketPair());
+      this.state.acceptWebSocket(server);
+      return new Response(null, { status: 101, webSocket: client } as ResponseInit);
     }
     if (path === "/sync/snapshot") {
       if (method !== "PUT") return new Response(null, { status: 405, headers: { Allow: "PUT" } });
@@ -384,6 +407,28 @@ export class DailyStore {
       if (ev.deleted && Date.parse(ev.updated_at) < cutoff) delete agent[id];
     }
     await this.state.storage.put("agent", agent);
+    this.notifyChanged();
+  }
+
+  private notifyChanged(): void {
+    const message = JSON.stringify({ type: "agent-changed", at: new Date().toISOString() });
+    for (const ws of this.state.getWebSockets()) {
+      try {
+        ws.send(message);
+      } catch {
+        // 已断开的连接由运行时清理
+      }
+    }
+  }
+
+  // 休眠 API 的回调：客户端只发心跳（已自动应答），其余消息忽略
+  async webSocketMessage(_ws: WebSocketLike, _message: unknown): Promise<void> {}
+  async webSocketClose(ws: WebSocketLike, code: number): Promise<void> {
+    try {
+      ws.close(code === 1005 ? 1000 : code);
+    } catch {
+      // 忽略
+    }
   }
   private async loadSnapshot(): Promise<Snapshot> {
     return (await this.state.storage.get<Snapshot>("snapshot")) ?? { events: [], generated_at: null };

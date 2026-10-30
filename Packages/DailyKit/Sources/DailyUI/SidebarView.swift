@@ -153,7 +153,7 @@ private struct GrokRelayEntry: View {
             if let relay = model.relay {
                 HStack(spacing: 5) {
                     Circle().fill(relay.error == nil ? Color.green : Color.orange).frame(width: 6, height: 6)
-                    Text(relay.error ?? "Grok 已连接" + (relay.lastSync.map { " · \($0.formatted("H:mm")) 同步" } ?? ""))
+                    Text(relay.error ?? "Grok 已连接 · " + (relay.isLive ? "实时" : relay.lastSync.map { "\($0.formatted("H:mm")) 同步" } ?? "连接中"))
                         .lineLimit(2)
                 }
                 .scaledFont(11)

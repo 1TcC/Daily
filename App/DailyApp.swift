@@ -17,6 +17,7 @@ final class AppServices {
     private var observer: NSObjectProtocol?
     private var relaySource: AgentRelaySource?
     private var relayTimer: Timer?
+    private var liveChannel: RelayLiveChannel?
     private var wakeObserver: NSObjectProtocol?
     private var lastSnapshotBody: Data?
     private static let relayAccount = "relayConnection"
@@ -72,6 +73,7 @@ final class AppServices {
         }
 
         model.actions.syncRelay = { [weak self] in Task { await self?.syncRelay() } }
+        model.actions.refresh = { [weak self] in Task { await self?.syncNow() } }
         model.actions.disconnectRelay = { [weak self] in Task { await self?.disconnectRelay() } }
         if let saved = Keychain.string(for: Self.relayAccount), let connection = RelayConnection(string: saved) {
             await connectRelay(connection, syncNow: false)
@@ -107,7 +109,17 @@ final class AppServices {
         await sync.register(source)
         model.relay = RelayStatus(mcpURL: connection.mcpURL)
 
-        // 每 2 分钟拉一次 Grok 写入的日程；Mac 从睡眠唤醒时立即同步。
+        // 实时推送：Grok 一改日程就收到通知并拉取。
+        liveChannel?.stop()
+        let channel = RelayLiveChannel(connection: connection) { [weak self] in
+            Task { await self?.syncRelay() }
+        } onStateChange: { [weak self] live in
+            self?.model.relay?.isLive = live
+        }
+        liveChannel = channel
+        channel.start()
+
+        // 兜底：每 2 分钟拉一次；Mac 从睡眠唤醒时重连并同步。
         relayTimer?.invalidate()
         relayTimer = Timer.scheduledTimer(withTimeInterval: 120, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.syncRelay() }
@@ -116,7 +128,10 @@ final class AppServices {
             wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
                 forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in await self?.syncRelay() }
+                Task { @MainActor in
+                    self?.liveChannel?.restart()
+                    await self?.syncRelay()
+                }
             }
         }
         if syncNow { await syncRelay() }
@@ -136,6 +151,8 @@ final class AppServices {
 
     private func disconnectRelay() async {
         Keychain.set(nil, for: Self.relayAccount)
+        liveChannel?.stop()
+        liveChannel = nil
         relayTimer?.invalidate()
         relayTimer = nil
         if let source = relaySource { await sync.unregister(sourceID: source.sourceID) }
@@ -185,6 +202,8 @@ final class AppServices {
     }
 
     func syncNow() async {
+        model.isSyncing = true
+        defer { model.isSyncing = false }
         let range = syncWindow
         let failures = await sync.syncAll(in: range)
         syncedRange = range
@@ -243,7 +262,6 @@ struct DailyApp: App {
             TextSizeCommands(model: services.model)
             CommandMenu("数据") {
                 Button("立即同步") { Task { await services.syncNow() } }
-                    .keyboardShortcut("r")
                 Divider()
                 Button("载入示例数据") { services.loadDemoData() }
                 Button("清除示例数据") { services.clearDemoData() }
