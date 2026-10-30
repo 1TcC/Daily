@@ -81,3 +81,44 @@ npx wrangler login
 npx wrangler secret put RELAY_SECRET
 npx wrangler deploy
 ```
+
+## 短信接收与日历订阅
+
+两个派生令牌，由 `RELAY_SECRET` 计算，不需要额外配置：
+
+- 写入令牌 `INGEST = sha256("<RELAY_SECRET>:ingest")` 的前 32 个十六进制字符
+- 订阅令牌 `FEED = sha256("<RELAY_SECRET>:feed")` 的前 32 个十六进制字符
+
+它们各自只能做一件事，泄露了也拿不到主密钥的读写权限。
+
+### `POST /ingest/<INGEST>/sms`
+
+iPhone 快捷指令在收到命中关键词的短信时调用。body：`{"text": "短信全文", "received_at": "可选 ISO 时间"}`（也接受 `text/plain` 的纯文本 body）。
+
+- 解析后**丢弃原文**，只保存结构化条目；解析不了的短信直接忽略。
+- 响应 `{"ok": true, "parsed": "pickup" | "picked_up" | "train" | "train_cancel" | "flight" | null}`；空文本返回 `parsed: null`。
+- 生成的条目存为 agent event：`client: "sms"`，并带 `kind` 与 `meta` 字段（见下）。同一条短信重复投递不会重复生成。
+
+条目类型：
+
+| kind | 来源短信 | 条目 |
+|---|---|---|
+| `parcel` | 驿站 / 快递柜 / 自提点到件通知 | 全天日程，从收到当天起 3 天（`end` 不含）；标题 `取件 <取件码> · <驿站或快递柜>`；`meta`: `pickup_code`, `station`, `carrier` |
+| — | 「已取件 / 已签收 / 已取出」 | 按取件码（或驿站）找到对应条目，标记删除 |
+| `travel` | 12306 购票 / 改签 | 定时日程，开车时间开始，无结束时间；标题 `<车次> <出发站>`，`location` 为出发站；`meta`: `train`, `seat`, `gate`, `order`。改签：同订单号旧条目删除后新建。退票：按订单号或车次删除 |
+| `travel` | 航班通知 | 标题 `<航班号> <出发>→<到达>`；`meta`: `flight` |
+
+年份推断：短信里只有「月日」时，取离当前时间最近、且不早于 30 天前的那一年。
+
+过期：`client: "sms"` 的条目，结束时间（无结束时间则开始时间 + 1 天）早于 7 天前时标记删除；墓碑按原规则 30 天后清理。
+
+MCP 的 `list_events` 照常返回这些条目（`source`：`短信`，带 `kind`、`meta`），`editable` 恒为 false；任何 AI 调用 `update_event` / `delete_event` 都会收到中文错误。`/mcp/sms` 不可用作 AI 身份。`GET /<SECRET>/sync/agent-events` 同样带 `kind`、`meta`。
+
+幂等：条目 id 由内容确定（快递：取件码 + 驿站 + 收到日期；车票：订单号 + 车次 + 日期；航班：航班号 + 日期），重复投递只会更新；已被取走/退票的条目不会因重复投递复活。同码同站且尚未取走的包裹，隔天再收到通知也只更新原条目。
+
+### `GET /feed/<FEED>/daily.ics`
+
+iCalendar 订阅源（`text/calendar`），供 iPhone「日历 → 添加订阅日历」使用：
+
+- 包含：快照里的非「系统日历」条目（课程等）+ 所有未删除的 agent event（Grok / Muse / 短信）。系统日历本来就在手机上，不重复放。
+- 范围：过去 7 天到未来 60 天。时间用 UTC（`...Z`），全天用 `VALUE=DATE`。每条有稳定 `UID`，`X-WR-CALNAME:Daily`，`REFRESH-INTERVAL`/`X-PUBLISHED-TTL` 为 15 分钟。

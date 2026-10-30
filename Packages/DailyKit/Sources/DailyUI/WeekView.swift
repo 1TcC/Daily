@@ -272,6 +272,9 @@ struct EventDetailView: View {
                     row("calendar", [item.metadata["units"], weeks].compactMap { $0 }.joined(separator: " · "))
                 }
                 if let code = item.metadata["pickupCode"] { row("number", "取件码 \(code)") }
+                if let seat = item.metadata["seat"] {
+                    row("tram", [seat, item.metadata["gate"].map { "检票口 \($0)" }].compactMap { $0 }.joined(separator: " · "))
+                }
                 if let notes = item.notes, notes != item.metadata["teacher"] { row("text.alignleft", notes) }
                 row(item.sourceKind.symbol, [item.sourceKind.displayName, item.metadata["calendarTitle"] ?? item.metadata["via"]]
                     .compactMap { $0 }.joined(separator: " · "))

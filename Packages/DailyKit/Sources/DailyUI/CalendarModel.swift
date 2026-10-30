@@ -19,9 +19,12 @@ public struct RelayStatus: Sendable {
     public var error: String?
     /// 实时推送连接是否在线。
     public var isLive = false
+    /// 只读的 iPhone 日历订阅地址。
+    public var calendarFeedURL: URL
 
-    public init(mcpURL: URL, lastSync: Date? = nil, error: String? = nil) {
+    public init(mcpURL: URL, calendarFeedURL: URL, lastSync: Date? = nil, error: String? = nil) {
         self.mcpURL = mcpURL
+        self.calendarFeedURL = calendarFeedURL
         self.lastSync = lastSync
         self.error = error
     }

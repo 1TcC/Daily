@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// 到 Daily Relay（Cloudflare 中转服务）的连接：`https://<worker>/<密钥>`。
@@ -22,6 +23,26 @@ public struct RelayConnection: Sendable, Equatable {
     public func mcpURL(for client: String) -> URL {
         client == "grok" ? mcpURL : mcpURL.appendingPathComponent(client)
     }
+    /// 主密钥（地址最后一段）。
+    private var secret: String { baseURL.lastPathComponent }
+    private var origin: URL { baseURL.deletingLastPathComponent() }
+
+    /// 由主密钥派生的单一用途令牌：sha256("<密钥>:<用途>") 的前 32 位十六进制。
+    func derivedToken(_ purpose: String) -> String {
+        SHA256.hash(data: Data("\(secret):\(purpose)".utf8)).map { String(format: "%02x", $0) }.joined().prefix(32).description
+    }
+
+    /// iPhone 快捷指令投递短信用的地址：只能写入，拿到它也读不到任何数据。
+    public var smsIngestURL: URL { origin.appendingPathComponent("ingest/\(derivedToken("ingest"))/sms") }
+
+    /// 只读的 iCalendar 订阅地址（webcal://），供 iPhone「日历」订阅。
+    public var calendarFeedURL: URL {
+        var components = URLComponents(url: origin.appendingPathComponent("feed/\(derivedToken("feed"))/daily.ics"),
+                                       resolvingAgainstBaseURL: false)!
+        components.scheme = "webcal"
+        return components.url!
+    }
+
     var agentEventsURL: URL { baseURL.appendingPathComponent("sync/agent-events") }
     var snapshotURL: URL { baseURL.appendingPathComponent("sync/snapshot") }
 }
@@ -37,14 +58,19 @@ public struct RelayAgentEvent: Codable, Sendable, Equatable {
     public var notes: String?
     public var updatedAt: String?
     public var deleted: Bool?
-    /// 创建它的 AI（grok、muse…）；旧数据没有，视为 grok。
+    /// 创建它的 AI（grok、muse…）或 "sms"（快捷指令投递的短信）；旧数据没有，视为 grok。
     public var client: String?
+    /// 短信条目的类型：parcel（取件）或 travel（车次 / 航班）。
+    public var kind: String?
+    /// 短信解析出的字段：pickup_code、station、train、seat、gate、flight 等。
+    public var meta: [String: String]?
 
     /// 显示用的名字。
     public var clientName: String {
         switch client ?? "grok" {
         case "grok": "Grok"
         case "muse": "Muse"
+        case "sms": "短信"
         case let other: other.prefix(1).uppercased() + other.dropFirst()
         }
     }
@@ -198,8 +224,20 @@ public struct AgentRelaySource: SourceProvider {
         let allDay = event.allDay ?? (event.start.count == 10)
         var end = event.end.flatMap { RelayTime.date($0, calendar: calendar) }
         if allDay, end == nil { end = calendar.date(byAdding: .day, value: 1, to: start) }
+        let kind: SourceKind = switch event.kind {
+        case "parcel": .parcel
+        case "travel": .travel
+        default: .agent
+        }
+        var metadata = ["relayID": event.id, "via": event.clientName]
+        // 中转服务用下划线命名，Daily 里统一成驼峰（详情和小组件按这些键读取）
+        for (key, value) in event.meta ?? [:] {
+            let parts = key.split(separator: "_")
+            let camel = parts.enumerated().map { $0 == 0 ? String($1) : $1.prefix(1).uppercased() + $1.dropFirst() }.joined()
+            metadata[camel] = value
+        }
         return CalendarItem(
-            sourceKind: .agent,
+            sourceKind: kind,
             sourceID: id,
             externalID: event.id,
             title: event.title,
@@ -208,7 +246,7 @@ public struct AgentRelaySource: SourceProvider {
             start: start,
             end: end,
             isAllDay: allDay,
-            metadata: ["relayID": event.id, "via": event.clientName]
+            metadata: metadata
         )
     }
 }

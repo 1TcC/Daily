@@ -93,7 +93,18 @@ final class AppServices {
     func handle(_ url: URL) {
         guard url.scheme == "daily", url.host == "relay",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return }
-        if items.contains(where: { $0.name == "disconnect" }) {
+        if let what = items.first(where: { $0.name == "copy" })?.value, let relay = model.relay {
+            // 生成快捷指令时由脚本调用：把只写的短信地址（或只读订阅地址）放进剪贴板
+            let url: URL? = switch what {
+            case "sms-ingest": relaySource?.client.connection.smsIngestURL
+            case "feed": relay.calendarFeedURL
+            default: nil
+            }
+            if let url {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url.absoluteString, forType: .string)
+            }
+        } else if items.contains(where: { $0.name == "disconnect" }) {
             Task { await disconnectRelay() }
         } else if let value = items.first(where: { $0.name == "url" })?.value,
                   let connection = RelayConnection(string: value) {
@@ -107,7 +118,7 @@ final class AppServices {
         relaySource = source
         lastSnapshotBody = nil
         await sync.register(source)
-        model.relay = RelayStatus(mcpURL: connection.mcpURL)
+        model.relay = RelayStatus(mcpURL: connection.mcpURL, calendarFeedURL: connection.calendarFeedURL)
 
         // 实时推送：Grok 一改日程就收到通知并拉取。
         liveChannel?.stop()

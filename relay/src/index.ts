@@ -1,6 +1,10 @@
 // Daily Relay：让手机上的 AI 助手（Grok，经 MCP）读写日程，并与 Mac 上的 Daily 同步。
 // Worker 只负责校验路径里的密钥并转发；所有状态与业务逻辑都在单个 Durable Object 里，保证强一致。
 
+import { Clock, DAY_MS, UserError } from "./clock.ts";
+import { parseSms, type SmsEvent, type SmsResult } from "./sms.ts";
+import { buildIcs } from "./ics.ts";
+
 // ---------- 最小类型声明（避免依赖 @cloudflare/workers-types） ----------
 
 interface DurableObjectStorageLike {
@@ -48,6 +52,10 @@ interface AgentEvent {
   deleted: boolean;
   /** 创建它的 AI（连接器路径 /mcp/<client>）；旧数据没有该字段，视为 grok。 */
   client?: string;
+  /** 短信生成的条目类别：parcel 快递 / travel 出行。 */
+  kind?: "parcel" | "travel";
+  /** 结构化附加信息（取件码、车次、座位等），只有短信条目有。 */
+  meta?: Record<string, string>;
 }
 interface SnapshotEvent {
   title: string;
@@ -65,18 +73,18 @@ interface Snapshot {
 type Json = unknown;
 type Args = Record<string, unknown>;
 
-/** 面向调用方的输入错误（中文说明），在 tools/call 里转成 isError。 */
-class UserError extends Error {}
-
 const MAX_SNAPSHOT_EVENTS = 5000;
 const MAX_SNAPSHOT_BYTES = 1_900_000; // DO 单个 value 上限约 2MB
 const MAX_RANGE_DAYS = 120;
-const TOMBSTONE_MS = 30 * 24 * 3600 * 1000;
-const DAY_MS = 24 * 3600 * 1000;
+const TOMBSTONE_MS = 30 * DAY_MS;
+const SMS_EXPIRE_MS = 7 * DAY_MS; // 短信条目结束 7 天后自动标记删除
+const MAX_SMS_BYTES = 20_000;
 
 /** 旧连接器地址 /mcp 对应的调用方。 */
 const DEFAULT_CLIENT = "grok";
-const CLIENT_NAMES: Record<string, string> = { grok: "Grok", muse: "Muse" };
+/** 短信自动生成的条目的 client；任何 AI 都不能改，也不允许作为 /mcp/<名字> 使用。 */
+const SMS_CLIENT = "sms";
+const CLIENT_NAMES: Record<string, string> = { grok: "Grok", muse: "Muse", [SMS_CLIENT]: "短信" };
 const clientOf = (ev: AgentEvent) => ev.client ?? DEFAULT_CLIENT;
 const clientName = (client: string) => CLIENT_NAMES[client] ?? client.charAt(0).toUpperCase() + client.slice(1);
 
@@ -102,11 +110,69 @@ function safeEqual(a: string, b: string): boolean {
 
 const notFound = () => new Response(null, { status: 404 });
 
+/** 由主密钥派生的子令牌：sha256("<secret>:<purpose>") 的前 32 个十六进制字符。 */
+async function deriveToken(secret: string, purpose: "ingest" | "feed"): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${secret}:${purpose}`));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+
+const methodNotAllowed = (allow: string) => new Response(null, { status: 405, headers: { Allow: allow } });
+
+/** 派生令牌路由：只能写入短信 / 读取订阅源，碰不到其它任何接口。未命中返回 null。 */
+async function routeDerived(request: Request, url: URL, secret: string, env: Env): Promise<Response | null> {
+  const m = url.pathname.match(/^\/(ingest|feed)\/([^/]+)\/(sms|daily\.ics)\/?$/);
+  if (!m) return null;
+  const [, kind, given, leaf] = m;
+  if ((kind === "ingest") !== (leaf === "sms")) return notFound();
+  let token = given;
+  try {
+    token = decodeURIComponent(given);
+  } catch {
+    return notFound();
+  }
+  if (!safeEqual(token, await deriveToken(secret, kind as "ingest" | "feed"))) return notFound();
+  const stub = env.STORE.get(env.STORE.idFromName("default"));
+
+  if (kind === "feed") {
+    if (request.method !== "GET" && request.method !== "HEAD") return methodNotAllowed("GET, HEAD");
+    return stub.fetch(new Request("https://store/feed.ics", { method: request.method }));
+  }
+  if (request.method !== "POST") return methodNotAllowed("POST");
+  const raw = await request.text();
+  if (raw.length > MAX_SMS_BYTES) return json({ ok: false, error: "内容太长" }, 413);
+  let text = raw;
+  let receivedAt: unknown;
+  if ((request.headers.get("Content-Type") ?? "").toLowerCase().includes("json")) {
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return json({ ok: false, error: "请求体不是合法 JSON" }, 400);
+    }
+    const b = body as { text?: unknown; received_at?: unknown } | null;
+    if (!b || typeof b !== "object" || typeof b.text !== "string") {
+      return json({ ok: false, error: "body 必须是 {text, received_at?}" }, 400);
+    }
+    text = b.text;
+    receivedAt = b.received_at;
+  }
+  return stub.fetch(
+    new Request("https://store/ingest-sms", {
+      method: "POST",
+      body: JSON.stringify({ text, received_at: typeof receivedAt === "string" ? receivedAt : undefined }),
+    }),
+  );
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const secret = env.RELAY_SECRET;
     if (!secret) return notFound();
+
+    // 派生令牌路由要先于 /<SECRET>/... 匹配
+    const derived = await routeDerived(request, url, secret, env);
+    if (derived) return derived;
 
     // 路径形如 /<SECRET>/<rest>
     const m = url.pathname.match(/^\/([^/]+)(\/.*)?$/);
@@ -135,127 +201,6 @@ export default {
   },
 };
 
-// ---------- 时间处理（固定偏移，无夏令时） ----------
-
-function parseOffsetMinutes(s: string | undefined): number {
-  const m = (s ?? "+08:00").match(/^([+-])(\d{2}):?(\d{2})$/);
-  if (!m) return 480;
-  return (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3]));
-}
-
-const pad = (n: number, w = 2) => String(n).padStart(w, "0");
-
-type Parsed = { kind: "date"; ymd: string } | { kind: "datetime"; ms: number };
-
-class Clock {
-  readonly offsetMs: number;
-  readonly offsetStr: string;
-  constructor(utcOffset: string | undefined) {
-    const min = parseOffsetMinutes(utcOffset);
-    this.offsetMs = min * 60000;
-    const a = Math.abs(min);
-    this.offsetStr = `${min < 0 ? "-" : "+"}${pad(Math.floor(a / 60))}:${pad(a % 60)}`;
-  }
-
-  /** 解析输入；失败返回 null。 */
-  parse(input: string): Parsed | null {
-    const s = input.trim();
-    const d = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (d) {
-      const [y, mo, da] = [Number(d[1]), Number(d[2]), Number(d[3])];
-      const t = new Date(Date.UTC(y, mo - 1, da));
-      if (t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== da) return null;
-      return { kind: "date", ymd: s };
-    }
-    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?$/i);
-    if (!m) return null;
-    const [y, mo, da, h, mi] = [m[1], m[2], m[3], m[4], m[5]].map(Number);
-    const sec = m[6] ? Number(m[6]) : 0;
-    if (h > 23 || mi > 59 || sec > 59) return null;
-    const t = new Date(Date.UTC(y, mo - 1, da, h, mi, sec));
-    if (t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== da) return null;
-    const off = m[7] ? (m[7].toUpperCase() === "Z" ? 0 : parseOffsetMinutes(m[7]) * 60000) : this.offsetMs;
-    return { kind: "datetime", ms: t.getTime() - off };
-  }
-
-  /** ms → 2026-11-03T19:35:00+08:00 */
-  format(ms: number): string {
-    return this.ymd(ms) + "T" + this.hms(ms) + this.offsetStr;
-  }
-  private local(ms: number): Date {
-    return new Date(ms + this.offsetMs);
-  }
-  ymd(ms: number): string {
-    const t = this.local(ms);
-    return `${pad(t.getUTCFullYear(), 4)}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
-  }
-  private hms(ms: number): string {
-    const t = this.local(ms);
-    return `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}:${pad(t.getUTCSeconds())}`;
-  }
-  /** 本地日期 00:00 对应的 UTC 毫秒。 */
-  midnight(ymd: string): number {
-    const [y, m, d] = ymd.split("-").map(Number);
-    return Date.UTC(y, m - 1, d) - this.offsetMs;
-  }
-  addDays(ymd: string, n: number): string {
-    const [y, m, d] = ymd.split("-").map(Number);
-    const t = new Date(Date.UTC(y, m - 1, d + n));
-    return `${pad(t.getUTCFullYear(), 4)}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
-  }
-  isDateOnly(s: string): boolean {
-    return this.parse(s)?.kind === "date";
-  }
-
-  /**
-   * 归一化起止时间。
-   * 全天：start/end 为 YYYY-MM-DD，end 不含（默认次日；end 不晚于 start 时按单日处理）。
-   * 非全天：输出带偏移的 ISO，end 必须晚于 start。
-   */
-  normalize(startIn: string, endIn: string | undefined, allDayIn: boolean | undefined) {
-    const s = this.parse(startIn);
-    if (!s) throw new UserError(`start 格式不对：「${startIn}」。可用 2026-11-03 19:35、2026-11-03T19:35、2026-11-03T19:35:00+08:00，全天日程用 2026-11-03。`);
-    let e: Parsed | null = null;
-    if (endIn !== undefined && endIn !== "") {
-      e = this.parse(endIn);
-      if (!e) throw new UserError(`end 格式不对：「${endIn}」。格式同 start。`);
-    }
-    const allDay = allDayIn ?? s.kind === "date";
-    if (allDay) {
-      const sd = s.kind === "date" ? s.ymd : this.ymd(s.ms);
-      let ed = e ? (e.kind === "date" ? e.ymd : this.ymd(e.ms)) : this.addDays(sd, 1);
-      if (ed < sd) throw new UserError("end 不能早于 start。");
-      if (ed === sd) ed = this.addDays(sd, 1);
-      return { start: sd, end: ed, all_day: true };
-    }
-    if (s.kind === "date") throw new UserError("非全天日程的 start 需要具体时间（如 2026-11-03 19:35）；若是全天日程请设置 all_day=true。");
-    const sms = s.ms;
-    const out: { start: string; end?: string; all_day: boolean } = { start: this.format(sms), all_day: false };
-    if (e) {
-      const ems = e.kind === "date" ? this.midnight(e.ymd) : e.ms;
-      if (ems <= sms) throw new UserError("end 必须晚于 start。");
-      out.end = this.format(ems);
-    }
-    return out;
-  }
-
-  /** 事件的 [起, 止) 毫秒区间；无 end 的定时日程视为一个瞬间。 */
-  span(ev: { start: string; end?: string; all_day: boolean }): [number, number] | null {
-    if (ev.all_day) {
-      const sd = this.parse(ev.start);
-      if (!sd) return null;
-      const s = this.midnight(sd.kind === "date" ? sd.ymd : this.ymd(sd.ms));
-      const ed = ev.end ? this.parse(ev.end) : null;
-      const e = ed ? this.midnight(ed.kind === "date" ? ed.ymd : this.ymd(ed.ms)) : s + DAY_MS;
-      return [s, Math.max(e, s + DAY_MS)];
-    }
-    const s = this.parse(ev.start);
-    if (!s || s.kind !== "datetime") return null;
-    const e = ev.end ? this.parse(ev.end) : null;
-    const ems = e && e.kind === "datetime" ? e.ms : s.ms;
-    return [s.ms, Math.max(ems, s.ms + 1)];
-  }
-}
 
 const utcStamp = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
@@ -380,9 +325,17 @@ export class DailyStore {
     const method = request.method;
     // /mcp 是 Grok 的旧地址；其他 AI 用 /mcp/<名字>（小写字母、数字、连字符），据此区分来源和编辑权限
     const mcp = path.match(/^\/mcp(?:\/([a-z0-9-]{1,20}))?$/);
-    if (mcp) {
+    if (mcp && mcp[1] !== SMS_CLIENT) {
       if (method === "POST") return this.handleMcp(request, mcp[1] ?? DEFAULT_CLIENT);
       return new Response(null, { status: 405, headers: { Allow: "POST, OPTIONS" } });
+    }
+    if (path === "/ingest-sms") {
+      if (method !== "POST") return methodNotAllowed("POST");
+      return this.ingestSms(request);
+    }
+    if (path === "/feed.ics") {
+      if (method !== "GET" && method !== "HEAD") return methodNotAllowed("GET, HEAD");
+      return this.feed();
     }
     if (path === "/sync/agent-events") {
       if (method !== "GET") return new Response(null, { status: 405, headers: { Allow: "GET" } });
@@ -411,8 +364,19 @@ export class DailyStore {
     return (await this.state.storage.get<Record<string, AgentEvent>>("agent")) ?? {};
   }
   private async saveAgent(agent: Record<string, AgentEvent>): Promise<void> {
+    const now = Date.now();
+    // 短信条目：结束（无结束则开始 + 1 天）超过 7 天就标记删除，由 Daily 同步删除
+    for (const ev of Object.values(agent)) {
+      if (ev.deleted || clientOf(ev) !== SMS_CLIENT) continue;
+      const sp = this.clock.span(ev);
+      const endMs = sp ? (ev.end || ev.all_day ? sp[1] : sp[0] + DAY_MS) : 0;
+      if (endMs < now - SMS_EXPIRE_MS) {
+        ev.deleted = true;
+        ev.updated_at = utcStamp();
+      }
+    }
     // 写入时顺便清理超过 30 天的墓碑
-    const cutoff = Date.now() - TOMBSTONE_MS;
+    const cutoff = now - TOMBSTONE_MS;
     for (const [id, ev] of Object.entries(agent)) {
       if (ev.deleted && Date.parse(ev.updated_at) < cutoff) delete agent[id];
     }
@@ -442,6 +406,116 @@ export class DailyStore {
   }
   private async loadSnapshot(): Promise<Snapshot> {
     return (await this.state.storage.get<Snapshot>("snapshot")) ?? { events: [], generated_at: null };
+  }
+
+  // ----- 短信接收 -----
+
+  private async ingestSms(request: Request): Promise<Response> {
+    let body: { text?: unknown; received_at?: unknown };
+    try {
+      body = await request.json();
+    } catch {
+      return json({ ok: false, error: "请求体不是合法 JSON" }, 400);
+    }
+    const text = typeof body.text === "string" ? body.text : "";
+    const now = Date.now();
+    // received_at 只在合理范围内采信（用于推断年份、包裹收到日）
+    let ref = now;
+    if (typeof body.received_at === "string") {
+      const t = Date.parse(body.received_at);
+      if (!Number.isNaN(t) && t <= now + 3600_000 && t >= now - 30 * DAY_MS) ref = t;
+    }
+    const result = parseSms(text, ref, this.clock);
+    if (!result) return json({ ok: true, parsed: null });
+
+    const agent = await this.loadAgent();
+    if (this.applySms(agent, result)) await this.saveAgent(agent);
+    return json({ ok: true, parsed: result.type });
+  }
+
+  /** 把解析结果应用到 agent 存储；有变化返回 true。 */
+  private applySms(agent: Record<string, AgentEvent>, r: NonNullable<SmsResult>): boolean {
+    const live = () => Object.values(agent).filter((e) => !e.deleted && clientOf(e) === SMS_CLIENT);
+    const remove = (list: AgentEvent[]) => {
+      const stamp = utcStamp();
+      for (const e of list) {
+        e.deleted = true;
+        e.updated_at = stamp;
+      }
+      return list.length > 0;
+    };
+    switch (r.type) {
+      case "pickup":
+        // 同码同站的未取件条目视为同一包裹（隔天重复通知），否则按确定性 id 新建
+        return this.upsertSms(agent, r.event, live().find((e) => e.kind === "parcel" && e.meta?.pickup_code === r.event.meta.pickup_code && e.meta.station === r.event.meta.station)?.id);
+      case "picked_up": {
+        const parcels = live().filter((e) => e.kind === "parcel");
+        let hit = r.code ? parcels.filter((e) => e.meta?.pickup_code === r.code) : [];
+        if (r.code && r.station && hit.length > 1) {
+          const same = hit.filter((e) => e.meta?.station === r.station);
+          if (same.length) hit = same;
+        }
+        if (!r.code && r.station) {
+          hit = parcels.filter((e) => e.meta?.station && (e.meta.station.includes(r.station!) || r.station!.includes(e.meta.station)));
+        }
+        return remove(hit);
+      }
+      case "train": {
+        let changed = false;
+        // 改签：同订单号的旧车次作废
+        if (r.rebook && r.order) {
+          changed = remove(live().filter((e) => e.kind === "travel" && e.meta?.train && e.meta.order === r.order && e.id !== r.event.id));
+        }
+        return this.upsertSms(agent, r.event) || changed;
+      }
+      case "train_cancel": {
+        const trains = live().filter((e) => e.kind === "travel" && e.meta?.train);
+        const byOrder = r.order ? trains.filter((e) => e.meta!.order === r.order) : [];
+        // 订单里有多张票时优先按车次缩小；没有订单号或找不到订单时，按车次 + 月日兜底
+        const sameTrain = byOrder.filter((e) => e.meta!.train === r.train);
+        const hit = byOrder.length
+          ? sameTrain.length ? sameTrain : byOrder
+          : trains.filter((e) => e.meta!.train === r.train && this.clock.ymd(this.clock.span(e)?.[0] ?? 0).slice(5) === r.date.slice(5));
+        return remove(hit);
+      }
+      case "flight":
+        return this.upsertSms(agent, r.event);
+    }
+  }
+
+  /** 按 id 新建或更新短信条目；已被删除的同 id 条目不复活（重复投递不应让取走的包裹回来）。 */
+  private upsertSms(agent: Record<string, AgentEvent>, pe: SmsEvent, existingId?: string): boolean {
+    const id = existingId ?? pe.id;
+    const old = agent[id];
+    if (old?.deleted) return false;
+    const next: AgentEvent = {
+      id,
+      title: pe.title,
+      start: pe.start,
+      ...(pe.end ? { end: pe.end } : {}),
+      all_day: pe.all_day,
+      ...(pe.location ? { location: pe.location } : {}),
+      ...(pe.notes ? { notes: pe.notes } : {}),
+      created_at: old?.created_at ?? utcStamp(),
+      updated_at: utcStamp(),
+      deleted: false,
+      client: SMS_CLIENT,
+      kind: pe.kind,
+      meta: pe.meta,
+    };
+    const same = (a: AgentEvent, b: AgentEvent) => JSON.stringify({ ...a, updated_at: "", created_at: "" }) === JSON.stringify({ ...b, updated_at: "", created_at: "" });
+    if (old && same(old, next)) return false;
+    agent[id] = next;
+    return true;
+  }
+
+  // ----- 日历订阅 -----
+
+  private async feed(): Promise<Response> {
+    const ics = buildIcs(await this.loadSnapshot(), Object.values(await this.loadAgent()), Date.now(), this.clock);
+    return new Response(ics, {
+      headers: { "Content-Type": "text/calendar; charset=utf-8", "Cache-Control": "no-cache" },
+    });
   }
 
   // ----- 同步：快照上传 -----
@@ -599,7 +673,9 @@ export class DailyStore {
     if (ev.location) out.location = ev.location;
     if (ev.notes) out.notes = ev.notes;
     out.source = clientName(clientOf(ev));
-    out.editable = clientOf(ev) === caller;
+    out.editable = clientOf(ev) === caller && clientOf(ev) !== SMS_CLIENT;
+    if (ev.kind) out.kind = ev.kind;
+    if (ev.meta) out.meta = ev.meta;
     if (withStamps) {
       out.created_at = ev.created_at;
       out.updated_at = ev.updated_at;
@@ -699,6 +775,9 @@ export class DailyStore {
     const ev = agent[id];
     if (!ev || ev.deleted) {
       throw new UserError(`找不到 id 为「${id}」的日程。只能修改/删除你自己创建的日程（editable=true），请先用 list_events 确认 id。`);
+    }
+    if (clientOf(ev) === SMS_CLIENT) {
+      throw new UserError("这条日程由短信自动生成（取件、车票、机票等），只读，任何 AI 都不能修改或删除。");
     }
     if (clientOf(ev) !== caller) {
       throw new UserError(`这条日程是 ${clientName(clientOf(ev))} 创建的，只能由它修改或删除。`);

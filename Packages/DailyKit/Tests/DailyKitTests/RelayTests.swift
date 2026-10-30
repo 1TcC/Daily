@@ -85,3 +85,31 @@ import Testing
         #expect(c.mcpURL(for: "muse").absoluteString == "https://r.example.dev/s3cret/mcp/muse")
     }
 }
+
+@Suite struct RelaySmsTests {
+    @Test func derivedTokens() {
+        // 与 `printf '%s' "s3cret:ingest" | shasum -a 256 | cut -c1-32` 一致
+        let c = RelayConnection(string: "https://r.example.dev/s3cret")!
+        #expect(c.smsIngestURL.absoluteString == "https://r.example.dev/ingest/e0b624ff1575031677630b7eec898d4a/sms")
+        #expect(c.calendarFeedURL.absoluteString == "webcal://r.example.dev/feed/9e91f2a37b08f0d4dfe713d93a471d83/daily.ics")
+    }
+
+    @Test func smsEventsMapToSourceKinds() {
+        var calendar = Calendar.mondayFirst
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let parcel = RelayAgentEvent(id: "sms-1", title: "取件 6-2-1043 · 菜鸟驿站", start: "2026-10-30", end: "2026-11-02",
+                                     allDay: true, client: "sms", kind: "parcel",
+                                     meta: ["pickup_code": "6-2-1043", "station": "北洋园菜鸟驿站"])
+        let item = AgentRelaySource.item(from: parcel, calendar: calendar)
+        #expect(item?.sourceKind == .parcel)
+        #expect(item?.metadata["pickupCode"] == "6-2-1043")
+        #expect(item?.metadata["station"] == "北洋园菜鸟驿站")
+        #expect(item?.metadata["via"] == "短信")
+
+        let train = RelayAgentEvent(id: "sms-2", title: "G2564 天津南", start: "2026-11-07T08:15:00+08:00",
+                                    client: "sms", kind: "travel", meta: ["seat": "5车12F号", "gate": "B12"])
+        let t = AgentRelaySource.item(from: train, calendar: calendar)
+        #expect(t?.sourceKind == .travel)
+        #expect(t?.metadata["gate"] == "B12")
+    }
+}

@@ -177,6 +177,19 @@ private struct GrokRelayEntry: View {
                     .buttonStyle(.plain)
                     .help("粘贴到 \(name) 的自定义 MCP 连接器里。地址里含密钥，不要发给别人。")
                 }
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(relay.calendarFeedURL.absoluteString, forType: .string)
+                    copied = "feed"
+                    Task { try? await Task.sleep(for: .seconds(2)); if copied == "feed" { copied = nil } }
+                } label: {
+                    Label(copied == "feed" ? "已复制" : "复制 iPhone 日历订阅地址",
+                          systemImage: copied == "feed" ? "checkmark" : "iphone")
+                        .scaledFont(11)
+                        .foregroundStyle(SourceKind.agent.color)
+                }
+                .buttonStyle(.plain)
+                .help("在 iPhone「设置 → 日历 → 账户 → 添加账户 → 其他 → 添加已订阅的日历」里粘贴。只读，包含课程、取件码、车次和 AI 加的日程。")
             } else {
                 Text("未连接 AI 助手").scaledFont(11).foregroundStyle(.secondary)
             }
