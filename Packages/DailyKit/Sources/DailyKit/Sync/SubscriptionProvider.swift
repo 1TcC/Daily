@@ -20,12 +20,11 @@ public struct SubscriptionProvider: SourceProvider {
         let calendar = Calendar.current
         return try store.subscriptions().flatMap { sub in
             sub.renewals(in: range, calendar: calendar).map { date in
-                let price = "\(sub.currency == "CNY" ? "¥" : sub.currency + " ")\(sub.price)"
                 return CalendarItem(
                     sourceKind: .subscription,
                     sourceID: sourceID,
                     externalID: "\(sub.id.uuidString)#\(Int(date.timeIntervalSince1970))",
-                    title: "\(sub.name) 续费 \(price)",
+                    title: "\(sub.name) 续费 \(sub.priceText)",
                     start: date,
                     end: calendar.date(byAdding: .day, value: 1, to: date),
                     isAllDay: true,

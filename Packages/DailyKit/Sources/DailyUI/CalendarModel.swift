@@ -45,7 +45,24 @@ public struct CalendarActions {
     public var importCourseSchedule: (CourseSchedule) -> Void = { _ in }
     /// 显示范围变了（翻页、切换视图），App 可以据此补同步该范围。
     public var visibleRangeChanged: (DateInterval) -> Void = { _ in }
+    /// 手动日程增删改后：刷新小组件、提醒和上传快照。
+    public var itemsChanged: () -> Void = {}
+    /// 订阅增删改后：重新生成续费条目。
+    public var subscriptionsChanged: () -> Void = {}
+    /// 提醒设置变了：重新安排通知。
+    public var remindersChanged: () -> Void = {}
+    public var requestNotificationAccess: () -> Void = {}
+    public var sendTestNotification: () -> Void = {}
+    public var setLaunchAtLogin: (Bool) -> Void = { _ in }
+    /// 粘贴中转服务地址连接（返回地址是否有效）。
+    public var connectRelay: (String) -> Bool = { _ in false }
+    public var setRelayPublicHost: (String?) -> Void = { _ in }
     public init() {}
+}
+
+/// 系统通知权限。
+public enum NotificationAccess: Sendable {
+    case notDetermined, granted, denied
 }
 
 /// 主窗口的状态：当前显示的日期范围、隐藏的来源、从存储读出的条目。
@@ -70,6 +87,33 @@ public final class CalendarModel {
     }
     public var actions = CalendarActions()
 
+    /// 正在新建 / 编辑的日程（弹出编辑表单）。
+    public var editor: EventDraft?
+    public var showingSubscriptions = false
+    /// 搜索框内容；非空时主区域显示搜索结果。
+    public var searchText = "" { didSet { runSearch() } }
+    public private(set) var searchResults: [CalendarItem] = []
+    /// 搜索框是否获得焦点（⌘F）。
+    public var searchPresented = false
+
+    // 设置
+    public var launchAtLogin = false
+    public var notificationAccess: NotificationAccess = .notDetermined
+    public var reminderSettings = Preferences.shared.reminders {
+        didSet {
+            guard reminderSettings != oldValue else { return }
+            Preferences.shared.reminders = reminderSettings
+            actions.remindersChanged()
+        }
+    }
+    /// 时间轴默认从几点开始。
+    public var timelineDefaultHour = Preferences.shared.timelineStartHour {
+        didSet { Preferences.shared.timelineStartHour = timelineDefaultHour }
+    }
+    public var showMenuBarIcon = Preferences.shared.showMenuBarIcon {
+        didSet { Preferences.shared.showMenuBarIcon = showMenuBarIcon }
+    }
+
     // 系统日历
     public var calendarAccess: CalendarAccess = .notDetermined
     public var systemCalendars: [SystemCalendarInfo] = []
@@ -82,6 +126,7 @@ public final class CalendarModel {
     public private(set) var pending: [CalendarItem] = []
     /// 还没取的快递（短信生成的取件条目，最近 14 天），按收到时间倒序。
     public private(set) var pendingParcels: [CalendarItem] = []
+    public private(set) var subscriptions: [Subscription] = []
     public private(set) var loadError: String?
     /// 「现在」，测试和截图时可以固定。
     public var now: () -> Date
@@ -99,11 +144,9 @@ public final class CalendarModel {
             // 连同前后相邻的一页一起加载，翻页拖动时相邻页也有数据。
             items = try store.items(in: loadedInterval)
             pending = try store.pendingItems()
-            let now = now()
-            pendingParcels = try store.items(in: DateInterval(start: now.addingTimeInterval(-14 * 86400),
-                                                              end: now.addingTimeInterval(86400)))
-                .filter { $0.sourceKind == .parcel && $0.metadata["pickupCode"] != nil }
-                .sorted { $0.start > $1.start }
+            pendingParcels = try store.pendingParcels(now: now())
+            subscriptions = try store.subscriptions()
+            if !searchText.isEmpty { runSearch() }
             loadError = nil
         } catch {
             loadError = String(describing: error)
@@ -232,8 +275,8 @@ public final class CalendarModel {
 
     /// 周 / 日视图时间轴从几点开始：默认 7 点，这几页里有更早开始的日程就提前到那个整点。
     /// 前一天开始、跨过午夜的日程不算，避免把时间轴撑回 0 点。
-    public func timelineStartHour(for anchors: [Date], defaultHour: Int = 7) -> Int {
-        var hour = defaultHour
+    public func timelineStartHour(for anchors: [Date]) -> Int {
+        var hour = timelineDefaultHour
         for anchor in anchors {
             for day in days(for: anchor) {
                 for item in timedItems(on: day) where calendar.isDate(item.start, inSameDayAs: day) {
@@ -251,6 +294,68 @@ public final class CalendarModel {
 
     public func toggle(_ kind: SourceKind) {
         if hiddenKinds.contains(kind) { hiddenKinds.remove(kind) } else { hiddenKinds.insert(kind) }
+    }
+
+    // MARK: - 新建 / 编辑
+
+    /// 新建日程：给了时间就从那个时间开始；否则当前页是今天就取下一个整点，别的日子取 9 点。
+    public func newEvent(at start: Date? = nil) {
+        let start = start ?? {
+            let now = now()
+            if calendar.isDate(anchorDate, inSameDayAs: now) || mode != .day && visibleInterval.contains(now) {
+                return calendar.nextDate(after: now, matching: DateComponents(minute: 0), matchingPolicy: .nextTime) ?? now
+            }
+            return calendar.date(bySettingHour: 9, minute: 0, second: 0, of: anchorDate) ?? anchorDate
+        }()
+        editor = EventDraft(start: start, calendar: calendar)
+    }
+
+    public func edit(_ item: CalendarItem) {
+        guard item.isEditable else { return }
+        editor = EventDraft(item: item, calendar: calendar)
+    }
+
+    public func save(_ draft: EventDraft) {
+        try? store.save(draft.item(calendar: calendar))
+        editor = nil
+        reload()
+        actions.itemsChanged()
+    }
+
+    public func delete(_ item: CalendarItem) {
+        guard item.isEditable else { return }
+        try? store.delete(id: item.id)
+        if editor?.id == item.id { editor = nil }
+        reload()
+        actions.itemsChanged()
+    }
+
+    // MARK: - 订阅
+
+    public func save(_ subscription: Subscription) {
+        try? store.save(subscription)
+        reload()
+        actions.subscriptionsChanged()
+    }
+
+    public func deleteSubscription(_ subscription: Subscription) {
+        try? store.deleteSubscription(id: subscription.id)
+        reload()
+        actions.subscriptionsChanged()
+    }
+
+    // MARK: - 搜索
+
+    private func runSearch() {
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        searchResults = query.isEmpty ? [] : ((try? store.search(query)) ?? [])
+    }
+
+    /// 从搜索结果跳到这个日程所在的那一页。
+    public func reveal(_ item: CalendarItem) {
+        if mode == .month || mode == .list { mode = .week }
+        anchorDate = item.start
+        searchText = ""
     }
 
     // MARK: - 待确认

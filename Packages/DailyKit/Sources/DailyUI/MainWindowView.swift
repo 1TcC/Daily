@@ -16,17 +16,28 @@ public struct MainWindowView: View {
                 .navigationSplitViewColumnWidth(min: 220 * model.textScale, ideal: 240 * model.textScale,
                                                 max: 300 * model.textScale)
         } detail: {
-            pageContent
+            Group {
+                if model.searchText.trimmingCharacters(in: .whitespaces).isEmpty {
+                    pageContent
+                } else {
+                    SearchResultsView(model: model)
+                }
+            }
                 .background(Color(nsColor: .textBackgroundColor))
                 // 标题交给系统排版：新版 macOS 会把同一组工具栏按钮包进圆角胶囊，自定义文字放进去会顶到边上。
                 .navigationTitle(model.title)
                 .navigationSubtitle(model.subtitle)
                 .toolbar { toolbar }
+                .searchable(text: $model.searchText, isPresented: $model.searchPresented, placement: .toolbar,
+                            prompt: "搜索日程、地点、取件码")
         }
         .environment(\.uiScale, model.textScale)
         .environment(\.markParcelPicked, { model.actions.markParcelPicked($0) })
+        .environment(model)
         .sheet(isPresented: $model.showingInbox) { PendingInboxView(model: model) }
         .sheet(isPresented: $model.showingCourseImport) { CourseImportView(model: model) }
+        .sheet(isPresented: $model.showingSubscriptions) { SubscriptionsView(model: model) }
+        .sheet(item: $model.editor) { EventEditorView(model: model, draft: $0) }
         .onChange(of: model.mode) { pager.reset() }
     }
 
@@ -97,8 +108,28 @@ public struct MainWindowView: View {
             .help("刷新：同步全部来源（⌘R）")
             .keyboardShortcut("r", modifiers: .command)
             .disabled(model.isSyncing)
-            Button { } label: { Image(systemName: "magnifyingglass") }.help("搜索")
-            Button { } label: { Image(systemName: "plus") }.help("新建日程")
+            Button { model.newEvent() } label: { Image(systemName: "plus") }
+                .help("新建日程（⌘N）")
+        }
+    }
+}
+
+/// 「文件」菜单里的新建日程和「编辑」菜单里的搜索。
+public struct EventCommands: Commands {
+    let model: CalendarModel
+
+    public init(model: CalendarModel) {
+        self.model = model
+    }
+
+    public var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("新建日程") { model.newEvent() }
+                .keyboardShortcut("n", modifiers: .command)
+        }
+        CommandGroup(after: .textEditing) {
+            Button("搜索日程") { model.searchPresented = true }
+                .keyboardShortcut("f", modifiers: .command)
         }
     }
 }

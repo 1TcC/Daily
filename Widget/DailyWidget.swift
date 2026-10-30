@@ -1,3 +1,4 @@
+import AppIntents
 import DailyKit
 import DailyUI
 import SwiftUI
@@ -36,6 +37,7 @@ struct TodayWidget: Widget {
         StaticConfiguration(kind: "today", provider: SnapshotProvider()) { entry in
             TodayAgendaWidgetView(snapshot: entry.snapshot)
                 .containerBackground(.background, for: .widget)
+                .widgetURL(URL(string: "daily://open"))
         }
         .configurationDisplayName("今日日程")
         .description("今天所有来源的安排。")
@@ -48,6 +50,7 @@ struct NowNextWidget: Widget {
         StaticConfiguration(kind: "now-next", provider: SnapshotProvider()) { entry in
             NowNextWidgetView(snapshot: entry.snapshot)
                 .containerBackground(.background, for: .widget)
+                .widgetURL(URL(string: "daily://open"))
         }
         .configurationDisplayName("进行中 / 下一项")
         .description("当前正在进行的安排和接下来的一项。")
@@ -58,12 +61,13 @@ struct NowNextWidget: Widget {
 struct SubscriptionWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "subscriptions", provider: SnapshotProvider()) { entry in
-            SubscriptionWidgetView(snapshot: entry.snapshot)
+            SubscriptionEntryView(snapshot: entry.snapshot)
                 .containerBackground(.background, for: .widget)
+                .widgetURL(URL(string: "daily://subscriptions"))
         }
         .configurationDisplayName("订阅支出")
-        .description("本月订阅总额和下一次续费。")
-        .supportedFamilies([.systemSmall])
+        .description("本月订阅总额和接下来的续费。")
+        .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
 
@@ -72,6 +76,7 @@ struct TripWidget: Widget {
         StaticConfiguration(kind: "trip", provider: SnapshotProvider()) { entry in
             TripWidgetView(snapshot: entry.snapshot)
                 .containerBackground(.background, for: .widget)
+                .widgetURL(URL(string: "daily://open" + (entry.snapshot.nextTrip.map { "?date=\(Int($0.start.timeIntervalSince1970))" } ?? "")))
         }
         .configurationDisplayName("下一次出行")
         .description("最近两周内的车次 / 航班。")
@@ -85,10 +90,50 @@ struct UpcomingWidget: Widget {
         StaticConfiguration(kind: "upcoming", provider: SnapshotProvider()) { entry in
             UpcomingEntryView(snapshot: entry.snapshot)
                 .containerBackground(.background, for: .widget)
+                .widgetURL(URL(string: "daily://open"))
         }
         .configurationDisplayName("接下来几天")
         .description("今天和之后几天的安排，按日期分组。")
         .supportedFamilies([.systemMedium, .systemLarge, .systemExtraLarge])
+    }
+}
+
+/// 待取件：小号显示最新的取件码，中号可以直接点「已取」。
+struct ParcelWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "parcels", provider: SnapshotProvider()) { entry in
+            ParcelEntryView(snapshot: entry.snapshot)
+                .containerBackground(.background, for: .widget)
+                .widgetURL(URL(string: "daily://open"))
+        }
+        .configurationDisplayName("待取件")
+        .description("短信里收到的取件码，取完可以直接在小组件上点「已取」。")
+        .supportedFamilies([.systemSmall, .systemMedium])
+    }
+}
+
+private struct ParcelEntryView: View {
+    let snapshot: WidgetSnapshot
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        ParcelWidgetView(snapshot: snapshot, wide: family != .systemSmall) { parcel in
+            Button(intent: MarkParcelPickedIntent(itemID: parcel.id)) {
+                Text("已取").font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(SourceKind.parcel.color)
+        }
+    }
+}
+
+private struct SubscriptionEntryView: View {
+    let snapshot: WidgetSnapshot
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        SubscriptionWidgetView(snapshot: snapshot, wide: family == .systemMedium)
     }
 }
 
@@ -109,6 +154,7 @@ private struct UpcomingEntryView: View {
 struct DailyWidgetBundle: WidgetBundle {
     var body: some Widget {
         UpcomingWidget()
+        ParcelWidget()
         TodayWidget()
         NowNextWidget()
         SubscriptionWidget()

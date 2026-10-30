@@ -33,6 +33,7 @@ struct AgendaRow: View {
     @Environment(\.uiScale) private var scale
     let item: CalendarItem
     let calendar: Calendar
+    @State private var showingDetail = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -52,6 +53,11 @@ struct AgendaRow: View {
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.03)))
+        .contentShape(Rectangle())
+        .onTapGesture { showingDetail = true }
+        .popover(isPresented: $showingDetail, arrowEdge: .trailing) {
+            EventDetailView(item: item, calendar: calendar)
+        }
     }
 }
 

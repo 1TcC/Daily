@@ -56,6 +56,15 @@ public struct CalendarItem: Identifiable, Codable, Hashable, Sendable {
         self.updatedAt = updatedAt
     }
 
+    /// 在 Daily 里手动新建的条目的 sourceID。
+    public static let manualSourceID = "manual"
+
+    /// 只有手动新建的条目可以编辑和删除；其他来源的条目下次同步会被覆盖。
+    public var isEditable: Bool { sourceID == Self.manualSourceID }
+
+    /// 短信识别出的取件条目（带取件码）。
+    public var isParcelWithCode: Bool { sourceKind == .parcel && metadata["pickupCode"] != nil }
+
     /// 无结束时间的条目（如「快递待取件」）按时间点处理，结束时间视为开始时间。
     public var effectiveEnd: Date { end ?? start }
 

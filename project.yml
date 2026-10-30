@@ -3,14 +3,14 @@ name: Daily
 options:
   bundleIdPrefix: com.rain.daily
   deploymentTarget:
-    macOS: "14.0"
+    macOS: "15.0"
   createIntermediateGroups: true
 
 settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "5"
+    CURRENT_PROJECT_VERSION: "6"
     CODE_SIGN_STYLE: Automatic
     # Personal Team。
     DEVELOPMENT_TEAM: 6UY9Y37MQH

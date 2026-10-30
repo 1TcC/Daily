@@ -7,6 +7,17 @@ public enum BillingCycle: Codable, Hashable, Sendable {
     case yearly
     case everyDays(Int)
 
+    /// 「每月」「每 30 天」。
+    public var displayName: String {
+        switch self {
+        case .weekly: "每周"
+        case .monthly: "每月"
+        case .quarterly: "每季度"
+        case .yearly: "每年"
+        case .everyDays(let n): "每 \(n) 天"
+        }
+    }
+
     var step: (Calendar.Component, Int) {
         switch self {
         case .weekly: (.day, 7)
@@ -51,6 +62,29 @@ public struct Subscription: Identifiable, Codable, Hashable, Sendable {
         self.firstBillingDate = firstBillingDate
         self.isActive = isActive
         self.notes = notes
+    }
+
+    /// 「¥21」「$9.99」。
+    public var priceText: String { Subscription.format(price, currency: currency) }
+
+    public static func symbol(for currency: String) -> String {
+        switch currency {
+        case "CNY": "¥"
+        case "USD": "$"
+        case "EUR": "€"
+        case "JPY": "JP¥"
+        case "HKD": "HK$"
+        case "GBP": "£"
+        default: currency + " "
+        }
+    }
+
+    /// 金额最多两位小数，整数不带小数点。
+    public static func format(_ amount: Decimal, currency: String) -> String {
+        var value = amount
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &value, 2, .plain)
+        return symbol(for: currency) + "\(rounded)"
     }
 
     public var monthlyCost: Decimal {

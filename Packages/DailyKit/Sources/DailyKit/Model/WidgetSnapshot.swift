@@ -27,6 +27,16 @@ public struct WidgetSnapshot: Sendable {
     public var pendingCount: Int
     /// 从今天起 7 天的安排；今天只保留还没结束的。
     public var days: [DayAgenda] = []
+    /// 还没取的快递，最新的在前。
+    public var pendingParcels: [CalendarItem] = []
+    /// 接下来 30 天内的续费，按日期排序。
+    public var upcomingRenewals: [Renewal] = []
+
+    public struct Renewal: Sendable, Identifiable {
+        public var subscription: Subscription
+        public var date: Date
+        public var id: String { "\(subscription.id)#\(date.timeIntervalSince1970)" }
+    }
 
     /// 正在进行的条目。
     public var current: CalendarItem? {
@@ -54,6 +64,11 @@ public struct WidgetSnapshot: Sendable {
             .compactMap { sub in sub.nextRenewal(after: now, calendar: calendar).map { (sub, $0) } }
             .min { $0.1 < $1.1 }
 
+        let renewalRange = DateInterval(start: dayStart, end: calendar.date(byAdding: .day, value: 30, to: dayStart)!)
+        let renewals = subs.flatMap { sub in
+            sub.renewals(in: renewalRange, calendar: calendar).map { Renewal(subscription: sub, date: $0) }
+        }.sorted { $0.date < $1.date }
+
         var days: [DayAgenda] = []
         for offset in 0..<7 {
             let start = calendar.date(byAdding: .day, value: offset, to: dayStart)!
@@ -77,7 +92,9 @@ public struct WidgetSnapshot: Sendable {
             subscriptionCount: subs.count,
             nextRenewal: nextRenewal.map { (subscription: $0.0, date: $0.1) },
             pendingCount: try store.pendingItems().count,
-            days: days
+            days: days,
+            pendingParcels: try store.pendingParcels(now: now),
+            upcomingRenewals: renewals
         )
     }
 

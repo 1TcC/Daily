@@ -157,7 +157,13 @@ private struct DayColumn: View {
         let items = model.timedItems(on: self.day).filter { $0.effectiveEnd > interval.start || $0.start >= interval.start }
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
-                if isToday { Palette.todayColumn }
+                // 双击空白处：在那个时间（按半小时取整）新建日程
+                (isToday ? Palette.todayColumn : Color.clear)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { point in
+                        let hours = (Double(point.y / hourHeight) * 2).rounded(.down) / 2
+                        model.newEvent(at: interval.start.addingTimeInterval(hours * 3600))
+                    }
                 ForEach(DayLayout.layout(items)) { placed in
                     let frame = frame(for: placed, in: interval, width: geo.size.width)
                     EventBlock(item: placed.item, size: frame.size, calendar: model.calendar)
@@ -258,6 +264,7 @@ struct EventDetailView: View {
     let item: CalendarItem
     let calendar: Calendar
     @Environment(\.markParcelPicked) private var markParcelPicked
+    @Environment(CalendarModel.self) private var model: CalendarModel?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -282,10 +289,23 @@ struct EventDetailView: View {
                     .compactMap { $0 }.joined(separator: " · "))
             }
             .font(.system(size: 12))
-            if item.sourceKind == .parcel, item.metadata["pickupCode"] != nil, let markParcelPicked {
+            if item.isParcelWithCode, let markParcelPicked {
                 Button("标记为已取件") {
                     markParcelPicked(item)
                     dismiss()
+                }
+                .controlSize(.small)
+            }
+            if item.isEditable, let model {
+                HStack {
+                    Button("编辑…") {
+                        dismiss()
+                        model.edit(item)
+                    }
+                    Button("删除", role: .destructive) {
+                        dismiss()
+                        model.delete(item)
+                    }
                 }
                 .controlSize(.small)
             }

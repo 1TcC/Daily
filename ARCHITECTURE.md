@@ -34,7 +34,10 @@ Daily/
 - **只读聚合**：外部来源只读不回写；用户手动建的条目 `sourceKind = .manual`。
 - **待确认**：AI 从邮件/微信等识别出的条目以 `status = .pending` 入库，用户确认后才显示在日历里。
 - **同步**：每个 Provider 每次返回某时间范围内的完整快照；SyncEngine 在该范围内按 `(sourceID, externalID)` upsert，并删除快照里已消失的条目。
-- **App 与 Widget 共享数据**：数据库放在 App Group 容器，Widget 只读。
+- **App 与 Widget 共享数据**：数据库放在 App Group 容器。Widget 只有一处写入：在「待取件」小组件上点「已取」，把条目标为 dismissed，并把中转服务 ID 放进 `parcelPicks` 队列，再发一个 Darwin 通知；App 收到后（或下次同步时）去中转服务删除。小组件本身不联网。
+- **手动日程**：`sourceID = "manual"`，没有 Provider 管它，同步不会覆盖；只有这类条目能在 App 里编辑和删除。可以标为「交通出行」，这样也会有出行提醒。
+- **提醒**：只提醒出行、取件码、订阅续费三类。`ReminderPlanner` 根据数据和设置算出要发的通知（纯函数，有测试），`ReminderScheduler` 把结果同步到系统通知中心：多的撤掉、缺的补上。定时通知由系统负责，App 没在运行也会弹出；「收到取件码」是 App 同步到新快递时立即发出的。
+- **后台运行**：关掉主窗口后 App 留在菜单栏（Dock 图标隐藏），继续同步。登录时自动打开（`SMAppService`）的情况下不弹出主窗口。
 
 ## 数据源路线
 
@@ -48,7 +51,7 @@ Daily/
 
 ## 约定
 
-- 最低系统 macOS 14（交互式小组件）。
+- 最低系统 macOS 15（`defaultLaunchBehavior` 等）。
 - 无付费开发者账号：使用 Personal Team 签名。
 - 数据层预留同步抽象，未来可接 CloudKit / iPhone 版。
 

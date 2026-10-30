@@ -1,5 +1,10 @@
 import Foundation
 
+/// 小组件点「已取」后通知 App 的跨进程通知名。
+public enum ParcelPick {
+    public static let darwinNotification = "com.rain.daily.parcelPicked"
+}
+
 /// 日程与订阅的本地存储。数据库放在 App Group 容器里，App 写、Widget 读。
 public final class ItemStore: Sendable {
     let db: SQLiteDatabase
@@ -142,6 +147,57 @@ public final class ItemStore: Sendable {
                 try db.execute("DELETE FROM items WHERE id = ?", [.text(old.id)])
             }
         }
+    }
+
+    /// 搜索标题、地点、备注和附加信息（取件码、车次等），按时间排序，最多 `limit` 条。
+    public func search(_ query: String, limit: Int = 200) throws -> [CalendarItem] {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else { return [] }
+        // 每个词都要出现在某个字段里；LIKE 的通配符要转义
+        let clause = Array(repeating: "(title LIKE ? ESCAPE '\\' OR location LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\' OR metadata LIKE ? ESCAPE '\\')",
+                           count: words.count).joined(separator: " AND ")
+        let args: [SQLValue] = [.text(ItemStatus.confirmed.rawValue)] + words.flatMap { word -> [SQLValue] in
+            let escaped = word.replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "%", with: "\\%")
+                .replacingOccurrences(of: "_", with: "\\_")
+            return Array(repeating: .text("%\(escaped)%"), count: 4)
+        } + [.int(Int64(limit))]
+        return try db.query("SELECT * FROM items WHERE status = ? AND \(clause) ORDER BY start LIMIT ?", args)
+            .compactMap(Self.decode)
+    }
+
+    /// 还没取的快递：最近 14 天短信识别出的取件条目，按收到时间倒序。
+    public func pendingParcels(now: Date = .now) throws -> [CalendarItem] {
+        try items(in: DateInterval(start: now.addingTimeInterval(-14 * 86400), end: now.addingTimeInterval(86400)))
+            .filter(\.isParcelWithCode)
+            .sorted { $0.start > $1.start }
+    }
+
+    // MARK: - 已取件队列
+
+    /// 在小组件上点了「已取」：本地先隐藏，中转服务里的条目留给 App 下次同步时删除（小组件不能联网）。
+    public func markParcelPickedLocally(id: UUID) throws {
+        guard let item = try item(id: id) else { return }
+        try setStatus(.dismissed, for: id)
+        if let relayID = item.metadata["relayID"] {
+            var queue = try document([String].self, key: "parcelPicks") ?? []
+            if !queue.contains(relayID) { queue.append(relayID) }
+            try saveDocument(queue, key: "parcelPicks")
+        }
+    }
+
+    /// 取出并清空待通知中转服务的已取件 ID。
+    public func takeParcelPicks() throws -> [String] {
+        let queue = try document([String].self, key: "parcelPicks") ?? []
+        if !queue.isEmpty { try saveDocument(Optional<[String]>.none, key: "parcelPicks") }
+        return queue
+    }
+
+    /// 通知失败的放回队列，下次再试。
+    public func requeueParcelPicks(_ ids: [String]) throws {
+        guard !ids.isEmpty else { return }
+        let queue = try document([String].self, key: "parcelPicks") ?? []
+        try saveDocument(Array(Set(queue + ids)).sorted(), key: "parcelPicks")
     }
 
     // MARK: - 订阅

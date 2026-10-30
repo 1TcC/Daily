@@ -43,4 +43,30 @@ public struct Preferences: Sendable {
         get { Set(defaults.stringArray(forKey: "excludedCalendarIDs") ?? []) }
         nonmutating set { defaults.set(newValue.sorted(), forKey: "excludedCalendarIDs") }
     }
+
+    /// 周 / 日视图的时间轴默认从几点开始（更早的日程会把它提前）。
+    public var timelineStartHour: Int {
+        get { defaults.object(forKey: "timelineStartHour") as? Int ?? 7 }
+        nonmutating set { defaults.set(newValue, forKey: "timelineStartHour") }
+    }
+
+    /// 是否在菜单栏显示 Daily 图标（关闭主窗口后仍在后台同步）。
+    public var showMenuBarIcon: Bool {
+        get { defaults.object(forKey: "showMenuBarIcon") as? Bool ?? true }
+        nonmutating set { defaults.set(newValue, forKey: "showMenuBarIcon") }
+    }
+
+    public var reminders: ReminderSettings {
+        get {
+            defaults.data(forKey: "reminders").flatMap { try? JSONDecoder().decode(ReminderSettings.self, from: $0) }
+                ?? ReminderSettings()
+        }
+        nonmutating set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "reminders") }
+    }
+
+    /// 已经发过「收到取件码」通知的快递，避免重复通知。只保留最近 200 个。
+    public var notifiedParcelIDs: [String] {
+        get { defaults.stringArray(forKey: "notifiedParcelIDs") ?? [] }
+        nonmutating set { defaults.set(Array(newValue.suffix(200)), forKey: "notifiedParcelIDs") }
+    }
 }

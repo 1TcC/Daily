@@ -69,6 +69,9 @@ struct SidebarView: View {
                     if kind == .course {
                         CourseImportEntry(model: model)
                     }
+                    if kind == .subscription {
+                        SubscriptionEntry(model: model)
+                    }
                     if kind == .agent {
                         GrokRelayEntry(model: model)
                     }
@@ -232,6 +235,36 @@ private struct CourseImportEntry: View {
         guard let schedule = model.courseSchedule else { return "从教务系统导入课表…" }
         let count = Set(schedule.courses.map(\.name)).count
         return "\(schedule.semester ?? "已导入") · \(count) 门课 · 重新导入"
+    }
+}
+
+/// 「订阅管理」下面：在订数量和每月支出，点开订阅管理。
+private struct SubscriptionEntry: View {
+    let model: CalendarModel
+    @Environment(\.uiScale) private var scale
+
+    var body: some View {
+        Button { model.showingSubscriptions = true } label: {
+            HStack(spacing: 4) {
+                Image(systemName: model.subscriptions.isEmpty ? "plus.circle" : "list.bullet")
+                Text(label).lineLimit(1)
+            }
+            .scaledFont(11)
+            .foregroundStyle(SourceKind.subscription.color)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, 29)
+        .frame(height: 22 * scale)
+        .help("添加、修改订阅，续费前会提醒")
+    }
+
+    private var label: String {
+        let active = model.subscriptions.filter(\.isActive)
+        guard !active.isEmpty else { return "添加订阅…" }
+        // 只合计人民币，其他币种只计数
+        let cny = active.filter { $0.currency == "CNY" }.reduce(Decimal(0)) { $0 + $1.monthlyCost }
+        return "\(active.count) 项 · 每月约 \(Subscription.format(cny, currency: "CNY")) · 管理"
     }
 }
 

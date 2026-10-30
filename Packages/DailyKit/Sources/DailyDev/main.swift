@@ -102,6 +102,77 @@ struct UpcomingGallery: View {
     }
 }
 
+/// 新增的小组件：待取件、订阅（中号）、出行。
+struct ExtraWidgetGallery: View {
+    let snapshot: WidgetSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            HStack(spacing: 24) {
+                card(ParcelWidgetView(snapshot: snapshot, wide: false) { _ in EmptyView() }, width: 170, height: 170)
+                card(ParcelWidgetView(snapshot: snapshot, wide: true) { _ in
+                    Button("已取") {}.buttonStyle(.bordered).controlSize(.small)
+                }, width: 364, height: 170)
+            }
+            HStack(spacing: 24) {
+                card(SubscriptionWidgetView(snapshot: snapshot), width: 170, height: 170)
+                card(SubscriptionWidgetView(snapshot: snapshot, wide: true), width: 364, height: 170)
+            }
+            card(TripWidgetView(snapshot: snapshot), width: 170, height: 170)
+        }
+        .padding(34)
+        .background(Color(red: 0.72, green: 0.76, blue: 0.81))
+    }
+
+    private func card(_ content: some View, width: CGFloat, height: CGFloat) -> some View {
+        content
+            .padding(16)
+            .frame(width: width, height: height, alignment: .topLeading)
+            .background(RoundedRectangle(cornerRadius: 22).fill(Color(nsColor: .windowBackgroundColor)))
+    }
+}
+
+/// `--panel <名字> out.png`：设置各页、菜单栏、订阅管理、编辑表单、搜索结果。
+if let i = args.firstIndex(of: "--panel"), i + 2 < args.count {
+    let name = args[i + 1], path = args[i + 2]
+    MainActor.assumeIsolated {
+        app.setActivationPolicy(.prohibited)
+        let model = makeModel(now: fixedNow)
+        let dark = args.contains("--dark")
+        switch name {
+        case "general", "reminders", "sources", "relay":
+            let tab: SettingsView.Tab = switch name {
+            case "reminders": .reminders
+            case "sources": .sources
+            case "relay": .relay
+            default: .general
+            }
+            model.notificationAccess = .granted
+            render(SettingsView(model: model, tab: tab), size: NSSize(width: 500, height: tab == .reminders ? 640 : 480),
+                   dark: dark, to: path)
+        case "menubar":
+            render(MenuBarView(model: model) {}, size: NSSize(width: 300, height: 560), dark: dark, to: path)
+        case "subscriptions":
+            render(SubscriptionsView(model: model), size: NSSize(width: 460, height: 520), dark: dark, to: path)
+        case "editor":
+            var draft = EventDraft(start: .now, calendar: model.calendar)
+            draft.kind = .travel
+            draft.title = "G1234 上海虹桥 → 北京南"
+            draft.isNew = false
+            render(EventEditorView(model: model, draft: draft), size: NSSize(width: 420, height: 620), dark: dark, to: path)
+        case "search":
+            model.searchText = "数"
+            render(MainWindowView(model: model), size: NSSize(width: 1200, height: 760), dark: dark, to: path)
+        case "widgets":
+            let snapshot = try! WidgetSnapshot.load(from: model.store, now: fixedNow ?? .now)
+            render(ExtraWidgetGallery(snapshot: snapshot), size: NSSize(width: 640, height: 640), dark: dark, to: path)
+        default:
+            print("unknown panel \(name)")
+        }
+    }
+    exit(0)
+}
+
 if let i = args.firstIndex(of: "--upcoming"), i + 1 < args.count {
     MainActor.assumeIsolated {
         app.setActivationPolicy(.prohibited)
