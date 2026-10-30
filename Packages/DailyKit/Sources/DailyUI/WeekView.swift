@@ -34,13 +34,11 @@ struct WeekView: View {
             }
             .frame(height: allDayHeight(anchors))
             Divider()
-            ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    grid(anchors)
-                        .padding(.top, 8)
-                        .padding(.bottom, 12)
-                }
-                .onAppear { proxy.scrollTo(7, anchor: .top) }
+            // 时间轴从 7 点（或更早的日程）开始，打开就能看到白天的安排，不用先划过凌晨。
+            ScrollView(.vertical) {
+                grid(anchors, startHour: model.timelineStartHour(for: anchors))
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
             }
         }
     }
@@ -51,10 +49,10 @@ struct WeekView: View {
         return max(30 * scale, CGFloat(most) * (22 * scale + 2) + 8)
     }
 
-    private func grid(_ anchors: [Date]) -> some View {
+    private func grid(_ anchors: [Date], startHour: Int) -> some View {
         HStack(alignment: .top, spacing: 0) {
             VStack(spacing: 0) {
-                ForEach(0..<24, id: \.self) { hour in
+                ForEach(startHour..<24, id: \.self) { hour in
                     Text(hour == 0 ? "" : "\(hour):00")
                         .scaledFont(10)
                         .foregroundStyle(.secondary)
@@ -66,17 +64,18 @@ struct WeekView: View {
             }
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
-                    ForEach(0..<24, id: \.self) { _ in
+                    ForEach(startHour..<24, id: \.self) { _ in
                         Rectangle().fill(Palette.gridLine).frame(height: 1)
                         Spacer(minLength: 0).frame(height: hourHeight - 1)
                     }
                 }
                 PagedStrip(pager: pager, axis: .horizontal, anchors: anchors) { anchor in
-                    WeekColumnsPage(model: model, days: model.days(for: anchor), hourHeight: hourHeight)
+                    WeekColumnsPage(model: model, days: model.days(for: anchor), hourHeight: hourHeight,
+                                    startHour: startHour)
                 }
             }
         }
-        .frame(height: hourHeight * 24)
+        .frame(height: hourHeight * CGFloat(24 - startHour))
     }
 }
 
@@ -130,11 +129,12 @@ private struct WeekColumnsPage: View {
     let model: CalendarModel
     let days: [Date]
     let hourHeight: CGFloat
+    let startHour: Int
 
     var body: some View {
         HStack(spacing: 0) {
             ForEach(days, id: \.self) { day in
-                DayColumn(model: model, day: day, hourHeight: hourHeight)
+                DayColumn(model: model, day: day, hourHeight: hourHeight, startHour: startHour)
                     .overlay(alignment: .leading) {
                         Rectangle().fill(Palette.gridLine).frame(width: 1)
                     }
@@ -147,14 +147,18 @@ private struct DayColumn: View {
     let model: CalendarModel
     let day: Date
     let hourHeight: CGFloat
+    let startHour: Int
 
     var body: some View {
-        let interval = model.dayInterval(day)
-        let isToday = model.isToday(day)
+        // 只画时间轴可见部分（startHour 之后）；更早结束的跨午夜日程不画。
+        let day = model.dayInterval(self.day)
+        let interval = DateInterval(start: day.start.addingTimeInterval(TimeInterval(startHour * 3600)), end: day.end)
+        let isToday = model.isToday(self.day)
+        let items = model.timedItems(on: self.day).filter { $0.effectiveEnd > interval.start || $0.start >= interval.start }
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
                 if isToday { Palette.todayColumn }
-                ForEach(DayLayout.layout(model.timedItems(on: day))) { placed in
+                ForEach(DayLayout.layout(items)) { placed in
                     let frame = frame(for: placed, in: interval, width: geo.size.width)
                     EventBlock(item: placed.item, height: frame.height, calendar: model.calendar)
                         .frame(width: frame.width, height: frame.height)

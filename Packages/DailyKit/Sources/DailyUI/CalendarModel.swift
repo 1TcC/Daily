@@ -192,6 +192,20 @@ public final class CalendarModel {
         return DateInterval(start: start, end: calendar.date(byAdding: .day, value: 1, to: start)!)
     }
 
+    /// 周 / 日视图时间轴从几点开始：默认 7 点，这几页里有更早开始的日程就提前到那个整点。
+    /// 前一天开始、跨过午夜的日程不算，避免把时间轴撑回 0 点。
+    public func timelineStartHour(for anchors: [Date], defaultHour: Int = 7) -> Int {
+        var hour = defaultHour
+        for anchor in anchors {
+            for day in days(for: anchor) {
+                for item in timedItems(on: day) where calendar.isDate(item.start, inSameDayAs: day) {
+                    hour = min(hour, calendar.component(.hour, from: item.start))
+                }
+            }
+        }
+        return hour
+    }
+
     public func count(of kind: SourceKind) -> Int {
         let interval = visibleInterval
         return items.filter { $0.sourceKind == kind && $0.overlaps(interval) }.count
