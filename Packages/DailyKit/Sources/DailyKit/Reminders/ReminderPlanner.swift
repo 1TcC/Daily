@@ -31,8 +31,10 @@ public enum ReminderPlanner {
     public static let maxPending = 60
 
     /// 定时提醒：出行（出发前、前一晚）、每天的未取件提醒、订阅续费。按时间排序，最多 `maxPending` 条。
+    /// iPhone 版没有订阅列表，`renewalsFromItems` 为 true 时改用 `items` 里的续费条目（Mac 同步过来的）。
     public static func scheduled(items: [CalendarItem], pendingParcels: [CalendarItem], subscriptions: [Subscription],
-                                 settings: ReminderSettings, now: Date, calendar: Calendar = .mondayFirst) -> [PlannedReminder] {
+                                 settings: ReminderSettings, now: Date, calendar: Calendar = .mondayFirst,
+                                 renewalsFromItems: Bool = false) -> [PlannedReminder] {
         var result: [PlannedReminder] = []
         let horizon = now.addingTimeInterval(14 * 86400)
 
@@ -77,19 +79,30 @@ public enum ReminderPlanner {
             }
         }
 
-        if settings.subscriptionEnabled {
+        if settings.subscriptionEnabled && renewalsFromItems {
+            for item in items where item.sourceKind == .subscription && item.isAllDay {
+                guard let day = calendar.date(byAdding: .day, value: -settings.subscriptionLeadDays, to: item.start) else { continue }
+                let fire = day.addingTimeInterval(Double(settings.subscriptionMinute * 60))
+                guard fire > now else { continue }
+                // 续费条目的标题是「iCloud+ 续费 ¥21」
+                let parts = item.title.components(separatedBy: " 续费 ")
+                result.append(PlannedReminder(
+                    id: "subscription.\(item.title.hashValueStable).\(Int(item.start.timeIntervalSince1970)).\(settings.subscriptionLeadDays)",
+                    category: .subscription, fireDate: fire,
+                    title: "\(parts[0]) \(whenText(settings.subscriptionLeadDays))续费",
+                    body: [parts.count > 1 ? parts[1] : nil, "\(dayText(item.start, calendar: calendar))扣费"]
+                        .compactMap { $0 }.joined(separator: " · ")))
+            }
+        }
+
+        if settings.subscriptionEnabled && !renewalsFromItems {
             let range = DateInterval(start: calendar.startOfDay(for: now), duration: 62 * 86400)
             for sub in subscriptions where sub.isActive {
                 for renewal in sub.renewals(in: range, calendar: calendar) {
                     guard let day = calendar.date(byAdding: .day, value: -settings.subscriptionLeadDays, to: renewal) else { continue }
                     let fire = day.addingTimeInterval(Double(settings.subscriptionMinute * 60))
                     guard fire > now else { continue }
-                    let when = switch settings.subscriptionLeadDays {
-                    case 0: "今天"
-                    case 1: "明天"
-                    case 2: "后天"
-                    default: "\(settings.subscriptionLeadDays) 天后"
-                    }
+                    let when = whenText(settings.subscriptionLeadDays)
                     result.append(PlannedReminder(
                         id: "subscription.\(sub.id.uuidString).\(Int(renewal.timeIntervalSince1970)).\(settings.subscriptionLeadDays).\(sub.priceText)",
                         category: .subscription, fireDate: fire,
@@ -126,6 +139,15 @@ public enum ReminderPlanner {
     }
 
     // MARK: - 文案
+
+    static func whenText(_ leadDays: Int) -> String {
+        switch leadDays {
+        case 0: "今天"
+        case 1: "明天"
+        case 2: "后天"
+        default: "\(leadDays) 天后"
+        }
+    }
 
     static func leadText(_ minutes: Int) -> String {
         if minutes % 60 == 0 { return "\(minutes / 60) 小时" }

@@ -1,3 +1,4 @@
+#if os(macOS)
 import DailyKit
 import SwiftUI
 import WebKit
@@ -330,3 +331,4 @@ enum CourseTableScript {
     })();
     """#
 }
+#endif

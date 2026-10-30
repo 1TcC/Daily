@@ -123,3 +123,29 @@ import Testing
         #expect(c.mcpURL.absoluteString == "https://daily-relay.x.workers.dev/s3cret/mcp")
     }
 }
+
+@Suite struct RelaySnapshotSourceTests {
+    @Test func snapshotRoundTripKeepsKindAndMetadata() throws {
+        let cal = Calendar.mondayFirst
+        let start = cal.date(from: DateComponents(year: 2031, month: 11, day: 3, hour: 8))!
+        let course = CalendarItem(sourceKind: .course, sourceID: "course", externalID: "c", title: "数据结构", location: "45楼B302",
+                                  start: start, end: start.addingTimeInterval(6000), metadata: ["teacher": "李四", "units": "1-2"])
+        let body = try RelayClient.snapshotBody([course], calendar: cal)
+        struct Wrapper: Decodable { var events: [RelaySnapshotEvent] }
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let event = try decoder.decode(Wrapper.self, from: body).events[0]
+        let item = try #require(RelaySnapshotSource.item(from: event, calendar: cal))
+        #expect(item.sourceKind == .course)
+        #expect(item.metadata["teacher"] == "李四")
+        #expect(item.metadata["units"] == nil)
+        #expect(item.start == start && item.location == "45楼B302" && item.notes == nil)
+    }
+
+    @Test func phoneAppURLUsesPublicHost() throws {
+        var connection = try #require(RelayConnection(string: "https://daily-relay.example.workers.dev/abc123"))
+        #expect(connection.phoneAppURL.absoluteString == "https://daily-relay.example.workers.dev/abc123")
+        connection.publicHost = "daily.example.com"
+        #expect(connection.phoneAppURL.absoluteString == "https://daily.example.com/abc123")
+    }
+}

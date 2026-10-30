@@ -80,7 +80,11 @@ final class AppServices {
         }
 
         model.actions.syncRelay = { [weak self] in Task { await self?.syncRelay() } }
-        model.actions.refresh = { [weak self] in Task { await self?.syncNow() } }
+        model.actions.refresh = { [weak self] in
+            // 手动刷新时快照也强制重新上传（例如中转服务升级后，让 iPhone 版拿到新字段）
+            self?.lastSnapshotBody = nil
+            Task { await self?.syncNow() }
+        }
         model.actions.markParcelPicked = { [weak self] item in self?.markParcelPicked(item) }
         model.actions.itemsChanged = { [weak self] in self?.finishSync() }
         model.actions.subscriptionsChanged = { [weak self] in
@@ -286,6 +290,7 @@ final class AppServices {
         lastSnapshotBody = nil
         await sync.register(source)
         model.relay = RelayStatus(mcpURL: connection.mcpURL, calendarFeedURL: connection.calendarFeedURL)
+        model.relay?.phoneAppURL = connection.phoneAppURL
 
         // 实时推送：Grok 一改日程就收到通知并拉取。
         liveChannel?.stop()

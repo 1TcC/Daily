@@ -69,4 +69,13 @@ public struct Preferences: Sendable {
         get { defaults.stringArray(forKey: "notifiedParcelIDs") ?? [] }
         nonmutating set { defaults.set(Array(newValue.suffix(200)), forKey: "notifiedParcelIDs") }
     }
+
+    /// iPhone 版：读取本机的系统日历（否则用 Mac 同步过来的系统日历）。
+    public var usesLocalCalendar: Bool {
+        get { defaults.bool(forKey: "usesLocalCalendar") }
+        nonmutating set { defaults.set(newValue, forKey: "usesLocalCalendar") }
+    }
+
+    /// 是否保存过提醒设置（iPhone 版第一次启动时用不同的默认值）。
+    public var hasReminderSettings: Bool { defaults.data(forKey: "reminders") != nil }
 }

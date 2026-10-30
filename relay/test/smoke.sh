@@ -73,6 +73,17 @@ BODY="$(cat /tmp/smoke_put.$$)"; rm -f /tmp/smoke_put.$$
 [ "$CODE" = "200" ] && check "PUT snapshot → ok,count=1" "$BODY" 'd["ok"] is True and d["count"]==1' || bad "PUT snapshot" "$CODE $BODY"
 R="$(tool list_events '{"start_date":"2031-11-03","end_date":"2031-11-03"}')"
 check "list_events 含快照条目 editable=false 且按开始时间排序" "$R" "(lambda x: [e['title'] for e in x['events']][0]=='数据结构' and x['events'][0]['editable'] is False and x['events'][0]['source']=='教务课程' and x['snapshot_updated_at']=='2031-11-01T00:00:00Z')(json.loads(d['result']['content'][0]['text']))"
+# GET snapshot（iPhone 版读取）：带回 kind / meta，非法的 kind 和 meta 键被丢弃
+curl -sS -o /dev/null -X PUT "$BASE/sync/snapshot" -H 'Content-Type: application/json' \
+  -d '{"events":[{"title":"数据结构","start":"2031-11-03T08:00:00+08:00","end":"2031-11-03T09:40:00+08:00","all_day":false,"location":"45楼B302","notes":"李四","source":"教务课程","kind":"course","meta":{"color":"#2F6FED","Bad-Key":"x","seat":""}},{"title":"坏 kind","start":"2031-11-04T08:00:00+08:00","kind":"<script>"}],"generated_at":"2031-11-01T00:00:00Z"}'
+R="$(curl -sS "$BASE/sync/snapshot")"
+check "GET snapshot 返回 kind 和合法 meta" "$R" 'd["events"][0]["kind"]=="course" and d["events"][0]["meta"]=={"color":"#2F6FED"} and "kind" not in d["events"][1] and d["generated_at"]=="2031-11-01T00:00:00Z"'
+R="$(tool list_events '{"start_date":"2031-11-03","end_date":"2031-11-03"}')"
+check "list_events 不暴露 kind / meta" "$R" "(lambda x: 'kind' not in x['events'][0] and 'meta' not in x['events'][0])(json.loads(d['result']['content'][0]['text']))"
+CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/sync/snapshot")"
+[ "$CODE" = "405" ] && ok "POST snapshot → 405" || bad "POST snapshot → 405" "$CODE"
+CODE="$(curl -sS -o /dev/null -w '%{http_code}' "$ORIGIN/wrongsecret/sync/snapshot")"
+[ "$CODE" = "404" ] || [ "$CODE" = "401" ] || [ "$CODE" = "403" ] && ok "错误密钥读不到快照（$CODE）" || bad "错误密钥读不到快照" "$CODE"
 CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X PUT "$BASE/sync/snapshot" -H 'Content-Type: application/json' -d '{"events":"nope"}')"
 [ "$CODE" = "400" ] && ok "PUT snapshot 非法 body → 400" || bad "PUT snapshot 非法 body → 400" "$CODE"
 

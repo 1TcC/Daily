@@ -1,3 +1,4 @@
+#if os(macOS)
 import DailyKit
 import SwiftUI
 
@@ -153,3 +154,4 @@ public struct TextSizeCommands: Commands {
         }
     }
 }
+#endif

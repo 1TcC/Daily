@@ -1,17 +1,43 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import DailyKit
 import SwiftUI
 
 extension Color {
     /// 随系统浅色 / 深色外观自动切换的颜色。
     init(light: UInt32, dark: UInt32) {
+        #if os(macOS)
         self.init(nsColor: NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             return NSColor(hex: isDark ? dark : light)
         })
+        #else
+        self.init(uiColor: UIColor { traits in
+            UIColor(hex: traits.userInterfaceStyle == .dark ? dark : light)
+        })
+        #endif
+    }
+
+    /// 0xRRGGBB。
+    init(hex: UInt32) {
+        self.init(.sRGB, red: Double((hex >> 16) & 0xFF) / 255, green: Double((hex >> 8) & 0xFF) / 255,
+                  blue: Double(hex & 0xFF) / 255)
     }
 }
 
+#if os(iOS)
+extension UIColor {
+    convenience init(hex: UInt32) {
+        self.init(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                  blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+}
+#endif
+
+#if os(macOS)
 extension NSColor {
     convenience init(hex: UInt32) {
         self.init(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
@@ -20,6 +46,7 @@ extension NSColor {
                   alpha: 1)
     }
 }
+#endif
 
 public extension SourceKind {
     var color: Color {
@@ -56,7 +83,7 @@ public extension CalendarItem {
     /// 系统日历条目沿用它在「日历」App 里的颜色，其他来源用来源色。
     var displayColor: Color {
         if let hex = metadata["color"], let value = UInt32(hex.dropFirst(), radix: 16), hex.count == 7 {
-            return Color(nsColor: NSColor(hex: value))
+            return Color(hex: value)
         }
         return sourceKind.color
     }
@@ -72,7 +99,8 @@ enum Palette {
     static let weekRow = Color(light: 0xE6E6EB, dark: 0x2C2C30)
 }
 
-extension Date {
+public extension Date {
+    /// 按 DateFormatter 模式格式化（中文）。
     func formatted(_ pattern: String, calendar: Calendar = .mondayFirst) -> String {
         let f = DateFormatter()
         f.calendar = calendar

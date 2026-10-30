@@ -65,6 +65,10 @@ interface SnapshotEvent {
   location?: string;
   notes?: string;
   source?: string;
+  /** Daily 里的来源大类（course、systemCalendar…），iPhone 版据此配色。 */
+  kind?: string;
+  /** 少量附加信息（颜色、座位、检票口等），键为小写下划线。 */
+  meta?: Record<string, string>;
 }
 interface Snapshot {
   events: SnapshotEvent[];
@@ -84,7 +88,7 @@ const MAX_SMS_BYTES = 20_000;
 const DEFAULT_CLIENT = "grok";
 /** 短信自动生成的条目的 client；任何 AI 都不能改，也不允许作为 /mcp/<名字> 使用。 */
 const SMS_CLIENT = "sms";
-const CLIENT_NAMES: Record<string, string> = { grok: "Grok", muse: "Muse", [SMS_CLIENT]: "短信" };
+const CLIENT_NAMES: Record<string, string> = { grok: "Grok", muse: "Muse", iphone: "iPhone", [SMS_CLIENT]: "短信" };
 const clientOf = (ev: AgentEvent) => ev.client ?? DEFAULT_CLIENT;
 const clientName = (client: string) => CLIENT_NAMES[client] ?? client.charAt(0).toUpperCase() + client.slice(1);
 
@@ -365,7 +369,9 @@ export class DailyStore {
       return new Response(null, { status: 101, webSocket: client } as ResponseInit);
     }
     if (path === "/sync/snapshot") {
-      if (method !== "PUT") return new Response(null, { status: 405, headers: { Allow: "PUT" } });
+      // Mac 上传；iPhone 版读取
+      if (method === "GET") return json(await this.loadSnapshot());
+      if (method !== "PUT") return new Response(null, { status: 405, headers: { Allow: "GET, PUT" } });
       return this.putSnapshot(request);
     }
     return notFound();
@@ -585,6 +591,14 @@ export class DailyStore {
     if (typeof r.location === "string" && r.location.trim()) ev.location = r.location.trim().slice(0, 200);
     if (typeof r.notes === "string" && r.notes.trim()) ev.notes = r.notes.trim().slice(0, 500);
     if (typeof r.source === "string" && r.source.trim()) ev.source = r.source.trim().slice(0, 50);
+    if (typeof r.kind === "string" && /^[A-Za-z]{1,20}$/.test(r.kind)) ev.kind = r.kind;
+    if (r.meta && typeof r.meta === "object" && !Array.isArray(r.meta)) {
+      const meta: Record<string, string> = {};
+      for (const [k, v] of Object.entries(r.meta as Record<string, unknown>).slice(0, 8)) {
+        if (/^[a-z_]{1,30}$/.test(k) && typeof v === "string" && v.trim()) meta[k] = v.trim().slice(0, 100);
+      }
+      if (Object.keys(meta).length) ev.meta = meta;
+    }
     return ev;
   }
 

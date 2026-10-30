@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "DailyKit",
     defaultLocalization: "zh-Hans",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS(.v15), .iOS(.v18)],
     products: [
         .library(name: "DailyKit", targets: ["DailyKit"]),
         .library(name: "DailyUI", targets: ["DailyUI"]),

@@ -95,6 +95,19 @@ private func parcel(_ code: String, _ received: Date, relayID: String) -> Calend
                                           settings: ReminderSettings(), now: now, calendar: shanghai).isEmpty)
     }
 
+    @Test func phoneUsesRenewalItems() {
+        let renewal = CalendarItem(sourceKind: .subscription, sourceID: "relay-snapshot", title: "iCloud+ 续费 ¥21",
+                                   start: date(2026, 11, 3), end: date(2026, 11, 4), isAllDay: true)
+        let plan = ReminderPlanner.scheduled(items: [renewal], pendingParcels: [], subscriptions: [],
+                                             settings: ReminderSettings(), now: now, calendar: shanghai, renewalsFromItems: true)
+        #expect(plan.map(\.title) == ["iCloud+ 明天续费"])
+        #expect(plan.first?.body == "¥21 · 11月3日扣费")
+        #expect(plan.first?.fireDate == date(2026, 11, 2, 9))
+        // Mac 上按订阅列表提醒，不重复用续费条目
+        #expect(ReminderPlanner.scheduled(items: [renewal], pendingParcels: [], subscriptions: [],
+                                          settings: ReminderSettings(), now: now, calendar: shanghai).isEmpty)
+    }
+
     @Test func idsChangeWhenTimeChanges() {
         let a = ReminderPlanner.scheduled(items: [trip(date(2026, 11, 2, 9))], pendingParcels: [], subscriptions: [],
                                           settings: ReminderSettings(), now: now, calendar: shanghai)

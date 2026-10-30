@@ -1,3 +1,4 @@
+#if os(macOS)
 import DailyKit
 import SwiftUI
 
@@ -275,7 +276,7 @@ private struct CalendarToggleRow: View {
     let action: () -> Void
 
     var body: some View {
-        let color = UInt32(calendar.colorHex.dropFirst(), radix: 16).map { Color(nsColor: NSColor(hex: $0)) }
+        let color = UInt32(calendar.colorHex.dropFirst(), radix: 16).map { Color(hex: $0) }
             ?? SourceKind.systemCalendar.color
         Button(action: action) {
             HStack(spacing: 8) {
@@ -383,3 +384,4 @@ struct MiniMonthView: View {
         }
     }
 }
+#endif

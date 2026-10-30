@@ -1,4 +1,4 @@
-import AppKit
+import CoreGraphics
 import EventKit
 import Foundation
 
@@ -151,12 +151,14 @@ public final class SystemCalendarSource: SourceProvider, @unchecked Sendable {
     }
 
     private static func info(_ calendar: EKCalendar) -> SystemCalendarInfo {
-        let color = NSColor(cgColor: calendar.cgColor)?.usingColorSpace(.sRGB)
+        let color = CGColorSpace(name: CGColorSpace.sRGB)
+            .flatMap { calendar.cgColor?.converted(to: $0, intent: .defaultIntent, options: nil) }
+            .flatMap(\.components).flatMap { $0.count >= 3 ? $0 : nil }
         return SystemCalendarInfo(
             id: calendar.calendarIdentifier,
             title: calendar.title,
             accountName: calendar.source?.title ?? "其他",
-            colorHex: color.map { hex(red: $0.redComponent, green: $0.greenComponent, blue: $0.blueComponent) } ?? "#0F8B8D"
+            colorHex: color.map { hex(red: Double($0[0]), green: Double($0[1]), blue: Double($0[2])) } ?? "#0F8B8D"
         )
     }
 

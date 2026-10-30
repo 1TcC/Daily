@@ -61,7 +61,7 @@ private struct ParcelPickedKey: EnvironmentKey {
     static let defaultValue: (@MainActor @Sendable (CalendarItem) -> Void)? = nil
 }
 
-extension EnvironmentValues {
+public extension EnvironmentValues {
     var markParcelPicked: (@MainActor @Sendable (CalendarItem) -> Void)? {
         get { self[ParcelPickedKey.self] }
         set { self[ParcelPickedKey.self] = newValue }

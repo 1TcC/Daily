@@ -1,3 +1,5 @@
+#if os(macOS)
+import CoreImage.CIFilterBuiltins
 import DailyKit
 import SwiftUI
 
@@ -273,6 +275,15 @@ private struct RelaySettings: View {
             } footer: {
                 Text("地址里含密钥，保存在钥匙串里，不会显示出来。").foregroundStyle(.secondary)
             }
+            if let phoneURL = model.relay?.phoneAppURL {
+                Section {
+                    PhoneConnectQR(url: phoneURL)
+                } header: {
+                    Text("iPhone 版 Daily")
+                } footer: {
+                    Text("用 iPhone 相机扫码即可连接（二维码含密钥，别给别人看）。也可以在 iPhone 版里粘贴地址。").foregroundStyle(.secondary)
+                }
+            }
             Section {
                 TextField("手机直连域名", text: $publicHost, prompt: Text("如 daily.example.com，可不填"))
                     .onSubmit { apply() }
@@ -296,3 +307,56 @@ private struct RelaySettings: View {
         model.actions.setRelayPublicHost(host.isEmpty ? nil : host)
     }
 }
+/// 连接 iPhone 版的二维码，默认遮住，点了才显示。
+private struct PhoneConnectQR: View {
+    let url: URL
+    @State private var shown = false
+    @State private var copied = false
+
+    /// 扫码后由 iPhone 版 Daily 打开：daily://relay?url=<地址>
+    private var link: String {
+        var components = URLComponents()
+        components.scheme = "daily"
+        components.host = "relay"
+        components.queryItems = [URLQueryItem(name: "url", value: url.absoluteString)]
+        return components.string ?? ""
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            ZStack {
+                if let image = Self.qrImage(link) {
+                    Image(nsImage: image).interpolation(.none).resizable().frame(width: 140, height: 140)
+                        .blur(radius: shown ? 0 : 12)
+                }
+                if !shown {
+                    Button("显示二维码") { shown = true }
+                }
+            }
+            .frame(width: 140, height: 140)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            VStack(alignment: .leading, spacing: 8) {
+                Text("1. 在 iPhone 上装好 Daily").foregroundStyle(.secondary)
+                Text("2. 用相机扫这个二维码，点「在 Daily 中打开」").foregroundStyle(.secondary)
+                Button(copied ? "已复制" : "复制连接地址") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                    copied = true
+                }
+                .controlSize(.small)
+                if shown { Button("隐藏二维码") { shown = false }.controlSize(.small) }
+            }
+            .font(.system(size: 12))
+        }
+    }
+
+    static func qrImage(_ text: String) -> NSImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(text.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 8, y: 8)),
+              let cg = CIContext().createCGImage(output, from: output.extent) else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: output.extent.width, height: output.extent.height))
+    }
+}
+#endif

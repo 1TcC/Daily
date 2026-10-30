@@ -1,3 +1,4 @@
+#if os(macOS)
 import DailyKit
 import SwiftUI
 
@@ -147,3 +148,4 @@ private struct MenuItemRow: View {
         }
     }
 }
+#endif

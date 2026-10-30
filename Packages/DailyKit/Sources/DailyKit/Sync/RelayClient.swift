@@ -55,6 +55,9 @@ public struct RelayConnection: Sendable, Equatable {
         return components.url!
     }
 
+    /// iPhone 版 Daily 用的连接地址：和 Mac 同一个密钥，但走手机直连域名。
+    public var phoneAppURL: URL { publicOrigin.appendingPathComponent(secret) }
+
     var agentEventsURL: URL { baseURL.appendingPathComponent("sync/agent-events") }
     var snapshotURL: URL { baseURL.appendingPathComponent("sync/snapshot") }
 }
@@ -83,29 +86,36 @@ public struct RelayAgentEvent: Codable, Sendable, Equatable {
         case "grok": "Grok"
         case "muse": "Muse"
         case "sms": "短信"
+        case "iphone": "iPhone"
         case let other: other.prefix(1).uppercased() + other.dropFirst()
         }
     }
 }
 
-/// 上传给中转服务、供 Grok 查询的日程快照条目。
-struct RelaySnapshotEvent: Codable, Sendable {
+/// 上传给中转服务、供 Grok 查询的日程快照条目；iPhone 版也读它。
+public struct RelaySnapshotEvent: Codable, Sendable {
     var title: String
     var start: String
     var end: String?
     var allDay: Bool
     var location: String?
     var notes: String?
-    var source: String
+    var source: String?
+    /// `SourceKind` 的原始值，iPhone 版据此配色。
+    var kind: String?
+    /// 颜色、座位、检票口等，键为小写下划线。
+    var meta: [String: String]?
 }
 
 public enum RelayError: Error, LocalizedError {
     case http(Int)
+    case message(String)
 
     public var errorDescription: String? {
         switch self {
         case .http(404): "中转服务地址或密钥不对（404）"
         case .http(let code): "中转服务返回错误（HTTP \(code)）"
+        case .message(let text): text
         }
     }
 }
@@ -207,12 +217,62 @@ public struct RelayClient: Sendable {
                 location: item.location,
                 notes: item.metadata["teacher"] ?? item.notes,
                 source: item.metadata["calendarTitle"].map { "\(item.sourceKind.displayName) · \($0)" }
-                    ?? item.sourceKind.displayName
+                    ?? item.sourceKind.displayName,
+                kind: item.sourceKind.rawValue,
+                meta: snapshotMeta(item)
             )
         }
         let encoder = Self.encoder
         encoder.outputFormatting = .sortedKeys
         return try encoder.encode(Body(events: events))
+    }
+
+    /// 快照里带给 iPhone 版的附加信息（键用小写下划线，中转服务只收这种键）。
+    static func snapshotMeta(_ item: CalendarItem) -> [String: String]? {
+        let keys = [("color", "color"), ("seat", "seat"), ("gate", "gate"), ("train", "train"), ("flight", "flight"),
+                    ("teacher", "teacher"), ("calendarTitle", "calendar_title")]
+        var meta: [String: String] = [:]
+        for (from, to) in keys { if let value = item.metadata[from] { meta[to] = value } }
+        return meta.isEmpty ? nil : meta
+    }
+
+    /// Mac 上传的日程快照（课程、系统日历、订阅续费等）。
+    public func snapshot() async throws -> [RelaySnapshotEvent] {
+        struct Response: Decodable { var events: [RelaySnapshotEvent] }
+        var request = URLRequest(url: connection.snapshotURL)
+        request.timeoutInterval = 20
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try Self.check(response)
+        return try Self.decoder.decode(Response.self, from: data).events
+    }
+
+    /// 以 iPhone 的身份新建一条日程（经 MCP 的 add_event，Mac 和各个 AI 都能看到）。
+    public func addEvent(title: String, start: String, end: String?, allDay: Bool, location: String?, notes: String?) async throws {
+        var arguments: [String: Any] = ["title": title, "start": start, "all_day": allDay]
+        if let end { arguments["end"] = end }
+        if let location, !location.isEmpty { arguments["location"] = location }
+        if let notes, !notes.isEmpty { arguments["notes"] = notes }
+        let body: [String: Any] = ["jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                   "params": ["name": "add_event", "arguments": arguments]]
+        var request = URLRequest(url: connection.mcpURL(for: "iphone"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 20
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try Self.check(response)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let result = json?["result"] as? [String: Any]
+        if result?["isError"] as? Bool == true || result == nil {
+            let text = ((result?["content"] as? [[String: Any]])?.first?["text"] as? String)
+                ?? (json?["error"] as? [String: Any])?["message"] as? String ?? "未知错误"
+            throw RelayError.message(text)
+        }
+    }
+
+    /// 本地时间转成中转服务的格式（全天日程只要日期）。
+    public static func timeString(_ date: Date, allDay: Bool, calendar: Calendar = .mondayFirst) -> String {
+        allDay ? RelayTime.dayString(date, calendar: calendar) : RelayTime.string(date)
     }
 
     private static func check(_ response: URLResponse) throws {
@@ -268,6 +328,55 @@ public struct AgentRelaySource: SourceProvider {
             start: start,
             end: end,
             isAllDay: allDay,
+            metadata: metadata
+        )
+    }
+}
+
+/// iPhone 版：把 Mac 上传的快照同步成本地条目，来源大类按快照里的 kind 还原。
+public struct RelaySnapshotSource: SourceProvider {
+    public static let id = "relay-snapshot"
+    public let sourceID = RelaySnapshotSource.id
+    public let kind = SourceKind.systemCalendar
+    public let displayName = "Mac 上的日程"
+    public let client: RelayClient
+    /// 不要的来源大类（例如 iPhone 自己读系统日历时，去掉 Mac 同步来的系统日历）。
+    public var excludedKinds: Set<SourceKind>
+
+    public init(client: RelayClient, excludedKinds: Set<SourceKind> = []) {
+        self.client = client
+        self.excludedKinds = excludedKinds
+    }
+
+    public func fetch(in range: DateInterval) async throws -> [CalendarItem] {
+        let calendar = Calendar.mondayFirst
+        return try await client.snapshot()
+            .compactMap { Self.item(from: $0, calendar: calendar) }
+            .filter { $0.overlaps(range) && !excludedKinds.contains($0.sourceKind) }
+    }
+
+    public static func item(from event: RelaySnapshotEvent, calendar: Calendar) -> CalendarItem? {
+        guard let start = RelayTime.date(event.start, calendar: calendar) else { return nil }
+        var end = event.end.flatMap { RelayTime.date($0, calendar: calendar) }
+        if event.allDay, end == nil { end = calendar.date(byAdding: .day, value: 1, to: start) }
+        var metadata: [String: String] = [:]
+        for (key, value) in event.meta ?? [:] {
+            let parts = key.split(separator: "_")
+            let camel = parts.enumerated().map { $0 == 0 ? String($1) : $1.prefix(1).uppercased() + $1.dropFirst() }.joined()
+            metadata[camel] = value
+        }
+        if metadata["calendarTitle"] == nil, let source = event.source { metadata["via"] = source }
+        let kind = event.kind.flatMap(SourceKind.init(rawValue:)) ?? .systemCalendar
+        return CalendarItem(
+            sourceKind: kind,
+            sourceID: id,
+            externalID: "\(event.title)#\(event.start)#\(event.source ?? "")",
+            title: event.title,
+            notes: kind == .course ? nil : event.notes,
+            location: event.location,
+            start: start,
+            end: end,
+            isAllDay: event.allDay,
             metadata: metadata
         )
     }

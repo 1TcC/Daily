@@ -21,6 +21,8 @@ public struct RelayStatus: Sendable {
     public var isLive = false
     /// 只读的 iPhone 日历订阅地址。
     public var calendarFeedURL: URL
+    /// iPhone 版 Daily 的连接地址（含密钥，走手机直连域名）。
+    public var phoneAppURL: URL?
 
     public init(mcpURL: URL, calendarFeedURL: URL, lastSync: Date? = nil, error: String? = nil) {
         self.mcpURL = mcpURL
