@@ -6,7 +6,8 @@ public enum UpcomingLayout: Sendable {
     case medium, large, extraLarge
 }
 
-/// 仿系统「日历」小组件：左边大号日期 + 农历 + 星期和今天的安排，右边按日期分组列出之后几天。
+/// 仿系统「日历」小组件：左边大号日期 + 农历 + 红色星期和今天的安排，右边按日期分组列出之后几天。
+/// 一天的日程要么完整显示、要么整天不显示；放不下时先改用单行紧凑样式，再把后面的日子折叠成一句话。
 public struct UpcomingWidgetView: View {
     let snapshot: WidgetSnapshot
     let layout: UpcomingLayout
@@ -16,53 +17,73 @@ public struct UpcomingWidgetView: View {
         self.layout = layout
     }
 
-    private var today: [CalendarItem] { snapshot.days.first?.items ?? [] }
+    private var today: DayAgenda { snapshot.days.first ?? DayAgenda(date: snapshot.date, items: []) }
     private var later: [DayAgenda] { snapshot.days.dropFirst().filter { !$0.items.isEmpty } }
 
     public var body: some View {
         switch layout {
         case .medium:
             HStack(alignment: .top, spacing: 14) {
-                todayColumn(maxCards: 1).frame(width: 118, alignment: .leading)
-                UpcomingList(days: later, maxCards: 2)
+                todayColumn.frame(width: 118, alignment: .leading)
+                DayStack(days: later, showHeaders: true, emptyText: "未来 7 天无日程")
             }
         case .large:
             VStack(alignment: .leading, spacing: 8) {
-                todayColumn(maxCards: 2)
-                Divider()
-                UpcomingList(days: later, maxCards: 4)
+                DateBlock(date: snapshot.date)
+                // 今天最多占三分之一高度，剩下的给之后几天
+                GeometryReader { geo in
+                    let todayHeight = DayStack.height(of: [today], showHeaders: false, compact: false)
+                        .clamped(to: 18...(geo.size.height * 0.36))
+                    VStack(alignment: .leading, spacing: 8) {
+                        DayStack(days: [today], showHeaders: false, emptyText: "今天无日程")
+                            .frame(height: todayHeight, alignment: .top)
+                        Divider()
+                        DayStack(days: later, showHeaders: true, emptyText: "未来 7 天无日程")
+                    }
+                }
             }
         case .extraLarge:
             HStack(alignment: .top, spacing: 16) {
-                todayColumn(maxCards: 6).frame(width: 170, alignment: .leading)
-                let split = splitDays(later)
-                UpcomingList(days: split.0, maxCards: 7)
-                UpcomingList(days: split.1, maxCards: 7, emptyText: nil)
+                todayColumn.frame(width: 170, alignment: .leading)
+                let split = Self.split(later)
+                DayStack(days: split.0, showHeaders: true, emptyText: "未来 7 天无日程")
+                DayStack(days: split.1, showHeaders: true, emptyText: nil)
             }
         }
     }
 
-    private func todayColumn(maxCards: Int) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private var todayColumn: some View {
+        VStack(alignment: .leading, spacing: 8) {
             DateBlock(date: snapshot.date)
-            TodayList(items: today, maxCards: maxCards)
+            DayStack(days: [today], showHeaders: false, emptyText: "今天无日程")
         }
     }
 
-    /// 超大号右侧两栏：按条数大致对半分，一天不拆开。
-    private func splitDays(_ days: [DayAgenda]) -> ([DayAgenda], [DayAgenda]) {
-        let half = (min(days.reduce(0) { $0 + $1.items.count }, 14) + 1) / 2
+    /// 超大号右侧两栏：按估算高度大致对半分，一天不拆开。
+    static func split(_ days: [DayAgenda]) -> ([DayAgenda], [DayAgenda]) {
+        let total = DayStack.height(of: days, showHeaders: true, compact: false)
         var left: [DayAgenda] = [], right: [DayAgenda] = []
-        var count = 0
+        var used: CGFloat = 0
         for day in days {
-            if count < half { left.append(day) } else { right.append(day) }
-            count += day.items.count
+            let h = DayStack.height(of: [day], showHeaders: true, compact: false)
+            if right.isEmpty, used == 0 || used + h / 2 <= total / 2 {
+                left.append(day)
+                used += h
+            } else {
+                right.append(day)
+            }
         }
         return (left, right)
     }
 }
 
-/// 大号日期 + 竖排的农历和星期（和系统日历小组件一样）。
+private extension CGFloat {
+    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat {
+        Swift.min(Swift.max(self, range.lowerBound), Swift.max(range.lowerBound, range.upperBound))
+    }
+}
+
+/// 大号日期 | 农历 | 星期（红色），和系统日历小组件一样竖排、细线分隔。
 private struct DateBlock: View {
     let date: Date
     private let cal = Calendar.mondayFirst
@@ -70,21 +91,23 @@ private struct DateBlock: View {
     var body: some View {
         HStack(alignment: .center, spacing: 7) {
             Text("\(cal.component(.day, from: date))")
-                .font(.system(size: 38, weight: .light))
+                .font(.system(size: 38, weight: .regular))
                 .monospacedDigit()
                 .fixedSize()
             divider
             VerticalText(text: Lunar.dayText(date))
+                .font(.system(size: 11, weight: .regular))
                 .foregroundStyle(.secondary)
             divider
             VerticalText(text: date.formatted("EEE", calendar: cal))
-                .fontWeight(.semibold)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Palette.today)
         }
         .frame(height: 44)
     }
 
     private var divider: some View {
-        Rectangle().fill(.secondary.opacity(0.35)).frame(width: 1, height: 30)
+        Rectangle().fill(.secondary.opacity(0.3)).frame(width: 1, height: 28)
     }
 }
 
@@ -96,68 +119,88 @@ private struct VerticalText: View {
         VStack(spacing: 0) {
             ForEach(Array(text.enumerated()), id: \.offset) { Text(String($0.element)) }
         }
-        .font(.system(size: 12, weight: .medium))
         .fixedSize()
     }
 }
 
-private struct TodayList: View {
-    let items: [CalendarItem]
-    let maxCards: Int
+/// 按天排列的日程：根据可用高度决定显示哪些天、用卡片还是单行样式。
+private struct DayStack: View {
+    let days: [DayAgenda]
+    let showHeaders: Bool
+    let emptyText: String?
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            if items.isEmpty {
-                Text("今天无日程")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 4)
-            } else {
-                ForEach(items.prefix(maxCards)) { EventCard(item: $0) }
-                if items.count > maxCards {
-                    MoreText(count: items.count - maxCards)
+    // 估算高度用的尺寸（字号：标题 11、副标题 10、日期标题 10）
+    static let cardHeight: CGFloat = 29
+    static let rowHeight: CGFloat = 14
+    static let headerHeight: CGFloat = 15
+    static let spacing: CGFloat = 3
+    static let foldHeight: CGFloat = 14
+
+    static func height(of days: [DayAgenda], showHeaders: Bool, compact: Bool) -> CGFloat {
+        days.enumerated().reduce(0) { sum, entry in
+            let (i, day) = entry
+            let header = showHeaders ? headerHeight + (i == 0 ? 0 : 4) : 0
+            let item = compact ? rowHeight : cardHeight
+            return sum + header + CGFloat(day.items.count) * (item + spacing)
+        }
+    }
+
+    /// 选出能完整放下的若干天，以及样式；第一天连紧凑样式都放不下时才截断。
+    static func plan(_ days: [DayAgenda], showHeaders: Bool, available: CGFloat) -> (days: [DayAgenda], compact: Bool, truncate: Int?) {
+        guard !days.isEmpty else { return ([], false, nil) }
+        for compact in [false, true] {
+            var chosen: [DayAgenda] = []
+            for (i, day) in days.enumerated() {
+                let candidate = chosen + [day]
+                let fold: CGFloat = i < days.count - 1 ? foldHeight : 0
+                if height(of: candidate, showHeaders: showHeaders, compact: compact) + fold <= available {
+                    chosen = candidate
+                } else {
+                    break
                 }
             }
+            if !chosen.isEmpty { return (chosen, compact, nil) }
         }
+        // 一天也放不下：紧凑样式显示这一天的前几项
+        let header = showHeaders ? headerHeight : 0
+        let fit = Int(max(1, (available - header - foldHeight) / (rowHeight + spacing)))
+        return ([days[0]], true, fit)
     }
-}
-
-/// 之后几天：日期标题 + 卡片，超出 maxCards 的部分折叠成「还有 N 项」。
-private struct UpcomingList: View {
-    let days: [DayAgenda]
-    let maxCards: Int
-    var emptyText: String? = "未来 7 天无日程"
-    private let cal = Calendar.mondayFirst
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            if days.isEmpty, let emptyText {
-                Text(emptyText).font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 4)
+        GeometryReader { geo in
+            let plan = Self.plan(days, showHeaders: showHeaders, available: geo.size.height)
+            VStack(alignment: .leading, spacing: Self.spacing) {
+                if days.isEmpty, let emptyText {
+                    Text(emptyText).font(.system(size: 11)).foregroundStyle(.secondary).padding(.top, 2)
+                }
+                ForEach(Array(plan.days.enumerated()), id: \.element.id) { index, day in
+                    if showHeaders {
+                        Text(day.date.formatted("M月d日 EEEE", calendar: .mondayFirst))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(height: Self.headerHeight - 3, alignment: .bottom)
+                            .padding(.top, index == 0 ? 0 : 4)
+                    }
+                    let items = plan.truncate.map { Array(day.items.prefix($0)) } ?? day.items
+                    ForEach(items) { item in
+                        if plan.compact { CompactRow(item: item) } else { EventCard(item: item) }
+                    }
+                }
+                if let fold = foldText(plan) {
+                    Text(fold).font(.system(size: 10)).foregroundStyle(.secondary)
+                }
             }
-            let plan = budget()
-            ForEach(plan, id: \.day.id) { entry in
-                Text(entry.day.date.formatted("M月d日 EEEE", calendar: cal))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, entry.day.id == plan.first?.day.id ? 0 : 3)
-                ForEach(entry.shown) { EventCard(item: $0) }
-            }
-            let hidden = days.reduce(0) { $0 + $1.items.count } - plan.reduce(0) { $0 + $1.shown.count }
-            if hidden > 0 { MoreText(count: hidden) }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    /// 按顺序分配卡片名额，直到用完。
-    private func budget() -> [(day: DayAgenda, shown: [CalendarItem])] {
-        var left = maxCards
-        var out: [(DayAgenda, [CalendarItem])] = []
-        for day in days where left > 0 {
-            let shown = Array(day.items.prefix(left))
-            left -= shown.count
-            out.append((day, shown))
+    private func foldText(_ plan: (days: [DayAgenda], compact: Bool, truncate: Int?)) -> String? {
+        if let truncate = plan.truncate, let first = plan.days.first, first.items.count > truncate {
+            return "这天还有 \(first.items.count - truncate) 项"
         }
-        return out
+        let hiddenDays = days.count - plan.days.count
+        return hiddenDays > 0 ? "之后还有 \(hiddenDays) 天的安排" : nil
     }
 }
 
@@ -167,37 +210,47 @@ private struct EventCard: View {
     private let cal = Calendar.mondayFirst
 
     var body: some View {
-        HStack(spacing: 6) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(item.title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
-                Text([item.timeText(calendar: cal), item.location].compactMap { $0 }.joined(separator: " · "))
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(item.title)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+            Text([item.timeText(calendar: cal), item.location].compactMap { $0 }.joined(separator: " · "))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 2.5)
         .padding(.leading, 9)
         .padding(.trailing, 5)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
-        // 色条放在背景里，不参与布局，卡片高度只由文字决定
+        .frame(maxWidth: .infinity, minHeight: DayStack.cardHeight, maxHeight: DayStack.cardHeight, alignment: .leading)
+        // 色条放在背景里，不参与布局，卡片高度固定
         .background(alignment: .leading) {
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 6).fill(item.displayColor.opacity(0.16))
-                RoundedRectangle(cornerRadius: 1.5).fill(item.displayColor).frame(width: 3).padding(.vertical, 4).padding(.leading, 3)
+                RoundedRectangle(cornerRadius: 5).fill(item.displayColor.opacity(0.16))
+                RoundedRectangle(cornerRadius: 1.5).fill(item.displayColor).frame(width: 3)
+                    .padding(.vertical, 4).padding(.leading, 3)
             }
         }
     }
 }
 
-private struct MoreText: View {
-    let count: Int
+/// 放不下卡片时的单行样式：色点 + 时间 + 标题。
+private struct CompactRow: View {
+    let item: CalendarItem
+    private let cal = Calendar.mondayFirst
+
     var body: some View {
-        Text("还有 \(count) 项").font(.system(size: 11)).foregroundStyle(.secondary)
+        HStack(spacing: 5) {
+            Circle().fill(item.displayColor).frame(width: 5, height: 5)
+            Text(item.isAllDay ? "全天" : item.start.formatted("H:mm", calendar: cal))
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 30, alignment: .leading)
+            Text(item.title)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+        }
+        .frame(height: DayStack.rowHeight)
     }
 }
 
