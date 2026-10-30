@@ -39,6 +39,9 @@ targets:
         CFBundleDisplayName: Daily
         LSApplicationCategoryType: public.app-category.productivity
         DailyAppGroup: $(TeamIdentifierPrefix)com.rain.daily
+        CFBundleURLTypes:
+          - CFBundleURLName: com.rain.daily
+            CFBundleURLSchemes: [daily]
         NSCalendarsFullAccessUsageDescription: Daily 需要读取系统日历，把它们和其他来源的日程合并显示。
         NSRemindersFullAccessUsageDescription: Daily 需要读取提醒事项，把待办和日程一起显示。
     entitlements:

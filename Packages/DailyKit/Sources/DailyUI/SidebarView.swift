@@ -67,6 +67,9 @@ struct SidebarView: View {
                     if kind == .course {
                         CourseImportEntry(model: model)
                     }
+                    if kind == .agent {
+                        GrokRelayEntry(model: model)
+                    }
                 }
             }
         }
@@ -136,6 +139,47 @@ private struct SystemCalendarList: View {
         .buttonStyle(.plain)
         .padding(.leading, 29)
         .frame(height: 22 * scale)
+    }
+}
+
+/// 「Agent / Bot 写入」下面：Grok 连接状态，复制连接器地址（地址里带密钥，不在界面上明文显示）。
+private struct GrokRelayEntry: View {
+    let model: CalendarModel
+    @Environment(\.uiScale) private var scale
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let relay = model.relay {
+                HStack(spacing: 5) {
+                    Circle().fill(relay.error == nil ? Color.green : Color.orange).frame(width: 6, height: 6)
+                    Text(relay.error ?? "Grok 已连接" + (relay.lastSync.map { " · \($0.formatted("H:mm")) 同步" } ?? ""))
+                        .lineLimit(2)
+                }
+                .scaledFont(11)
+                .foregroundStyle(.secondary)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(relay.mcpURL.absoluteString, forType: .string)
+                    copied = true
+                    Task { try? await Task.sleep(for: .seconds(2)); copied = false }
+                } label: {
+                    Label(copied ? "已复制" : "复制 Grok 连接器地址", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .scaledFont(11)
+                        .foregroundStyle(SourceKind.agent.color)
+                }
+                .buttonStyle(.plain)
+                .help("粘贴到 grok.com/connectors 的自定义连接器里。地址里含密钥，不要发给别人。")
+                .contextMenu {
+                    Button("立即同步") { model.actions.syncRelay() }
+                    Button("断开 Grok", role: .destructive) { model.actions.disconnectRelay() }
+                }
+            } else {
+                Text("未连接 Grok").scaledFont(11).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.leading, 29)
+        .padding(.vertical, 2)
     }
 }
 

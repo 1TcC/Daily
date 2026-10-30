@@ -1,0 +1,14 @@
+{
+  "name": "daily-relay",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy",
+    "test": "bash test/smoke.sh"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

@@ -11,11 +11,26 @@ public enum ViewMode: String, CaseIterable, Identifiable, Sendable {
     public var id: Self { self }
 }
 
+/// 与 Grok 中转服务的连接状态。
+public struct RelayStatus: Sendable {
+    public var mcpURL: URL
+    public var lastSync: Date?
+    public var error: String?
+
+    public init(mcpURL: URL, lastSync: Date? = nil, error: String? = nil) {
+        self.mcpURL = mcpURL
+        self.lastSync = lastSync
+        self.error = error
+    }
+}
+
 /// 需要 App 层（同步、授权）处理的操作，由 App 注入，DailyUI 本身不管数据来源。
 @MainActor
 public struct CalendarActions {
     public var requestCalendarAccess: () -> Void = {}
     public var setCalendarIncluded: (_ calendarID: String, _ included: Bool) -> Void = { _, _ in }
+    public var disconnectRelay: () -> Void = {}
+    public var syncRelay: () -> Void = {}
     /// 从教务系统导入了新课表。
     public var importCourseSchedule: (CourseSchedule) -> Void = { _ in }
     /// 显示范围变了（翻页、切换视图），App 可以据此补同步该范围。
@@ -34,6 +49,8 @@ public final class CalendarModel {
     public var lastSync: Date?
     public var showingInbox = false
     public var showingCourseImport = false
+    /// 已连接 Grok 中转服务时非空。
+    public var relay: RelayStatus?
     /// 已导入的课表，用于侧边栏摘要和显示教学周。
     public var courseSchedule: CourseSchedule?
     /// 主窗口字体缩放，见 `TextScale`。

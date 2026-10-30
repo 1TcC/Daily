@@ -1,3 +1,4 @@
+import AppKit
 import DailyKit
 import DailyUI
 import EventKit
@@ -14,6 +15,11 @@ final class AppServices {
     private var syncedRange: DateInterval?
     private var calendarChangeTask: Task<Void, Never>?
     private var observer: NSObjectProtocol?
+    private var relaySource: AgentRelaySource?
+    private var relayTimer: Timer?
+    private var wakeObserver: NSObjectProtocol?
+    private var lastSnapshotBody: Data?
+    private static let relayAccount = "relayConnection"
 
     init() {
         let store = (try? ItemStore(url: AppGroup.databaseURL)) ?? (try! ItemStore.inMemory())
@@ -65,11 +71,97 @@ final class AppServices {
             }
         }
 
+        model.actions.syncRelay = { [weak self] in Task { await self?.syncRelay() } }
+        model.actions.disconnectRelay = { [weak self] in Task { await self?.disconnectRelay() } }
+        if let saved = Keychain.string(for: Self.relayAccount), let connection = RelayConnection(string: saved) {
+            await connectRelay(connection, syncNow: false)
+        }
+
         if SystemCalendarSource.access == .notDetermined {
             await requestCalendarAccess()
         } else {
             refreshCalendarList()
             await syncNow()
+        }
+    }
+
+    // MARK: - Grok 中转
+
+    /// `daily://relay?url=<https://worker/密钥>` 写入连接；`daily://relay?disconnect=1` 断开。
+    func handle(_ url: URL) {
+        guard url.scheme == "daily", url.host == "relay",
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return }
+        if items.contains(where: { $0.name == "disconnect" }) {
+            Task { await disconnectRelay() }
+        } else if let value = items.first(where: { $0.name == "url" })?.value,
+                  let connection = RelayConnection(string: value) {
+            Keychain.set(connection.baseURL.absoluteString, for: Self.relayAccount)
+            Task { await connectRelay(connection, syncNow: true) }
+        }
+    }
+
+    private func connectRelay(_ connection: RelayConnection, syncNow: Bool) async {
+        let source = AgentRelaySource(client: RelayClient(connection: connection))
+        relaySource = source
+        lastSnapshotBody = nil
+        await sync.register(source)
+        model.relay = RelayStatus(mcpURL: connection.mcpURL)
+
+        // 每 2 分钟拉一次 Grok 写入的日程；Mac 从睡眠唤醒时立即同步。
+        relayTimer?.invalidate()
+        relayTimer = Timer.scheduledTimer(withTimeInterval: 120, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.syncRelay() }
+        }
+        if wakeObserver == nil {
+            wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in await self?.syncRelay() }
+            }
+        }
+        if syncNow { await syncRelay() }
+    }
+
+    func syncRelay() async {
+        guard let source = relaySource else { return }
+        do {
+            try await sync.sync(sourceID: source.sourceID, in: syncedRange ?? syncWindow)
+            model.relay?.lastSync = .now
+            model.relay?.error = nil
+        } catch {
+            model.relay?.error = "Grok 同步失败：\(error.localizedDescription)"
+        }
+        finishSync()
+    }
+
+    private func disconnectRelay() async {
+        Keychain.set(nil, for: Self.relayAccount)
+        relayTimer?.invalidate()
+        relayTimer = nil
+        if let source = relaySource { await sync.unregister(sourceID: source.sourceID) }
+        relaySource = nil
+        try? store.deleteItems(sourceID: AgentRelaySource.id)
+        model.relay = nil
+        finishSync()
+    }
+
+    /// 把今天前 7 天到后 60 天的日程（Grok 自己写的除外）上传给中转服务，内容没变就跳过。
+    private func uploadSnapshotIfNeeded() {
+        guard let client = relaySource?.client else { return }
+        let calendar = model.calendar
+        let today = calendar.startOfDay(for: .now)
+        let range = DateInterval(start: calendar.date(byAdding: .day, value: -7, to: today)!,
+                                 end: calendar.date(byAdding: .day, value: 60, to: today)!)
+        guard let items = try? store.items(in: range).filter({ $0.sourceKind != .agent }),
+              let body = try? RelayClient.snapshotBody(items, calendar: calendar),
+              body != lastSnapshotBody else { return }
+        Task {
+            do {
+                try await client.uploadSnapshot(body: body)
+                lastSnapshotBody = body
+            } catch {
+                model.relay?.error = "日程快照上传失败：\(error.localizedDescription)"
+            }
         }
     }
 
@@ -94,8 +186,16 @@ final class AppServices {
 
     func syncNow() async {
         let range = syncWindow
-        await sync.syncAll(in: range)
+        let failures = await sync.syncAll(in: range)
         syncedRange = range
+        if relaySource != nil {
+            if let error = failures[AgentRelaySource.id] {
+                model.relay?.error = "Grok 同步失败：\(error.localizedDescription)"
+            } else {
+                model.relay?.lastSync = .now
+                model.relay?.error = nil
+            }
+        }
         finishSync()
     }
 
@@ -109,6 +209,7 @@ final class AppServices {
         model.lastSync = .now
         model.reload()
         WidgetCenter.shared.reloadAllTimelines()
+        uploadSnapshotIfNeeded()
     }
 
     func clearDemoData() {
@@ -135,6 +236,7 @@ struct DailyApp: App {
             MainWindowView(model: services.model)
                 .frame(minWidth: 960, minHeight: 600)
                 .task { await services.start() }
+                .onOpenURL { services.handle($0) }
         }
         .defaultSize(width: 1200, height: 760)
         .commands {
