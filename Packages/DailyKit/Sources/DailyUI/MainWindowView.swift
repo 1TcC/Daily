@@ -29,7 +29,7 @@ public struct MainWindowView: View {
         .onChange(of: model.mode) { pager.reset() }
     }
 
-    /// 双指左右滑动翻页（日 / 周 / 列表）；月视图上下滑动翻月。
+    /// 双指左右滑动翻页；上下滑动滚动内容。
     @ViewBuilder
     private var pageContent: some View {
         switch model.mode {
@@ -37,14 +37,22 @@ public struct MainWindowView: View {
             WeekView(model: model, pager: pager)
                 .pagingGesture(.horizontal, pager: pager) { model.step($0) }
         case .month:
+            // 月视图：左右滑动翻月，上下滚动看完整个月（安排多的周行会变高）。
+            let anchors = model.pageAnchors
+            let contentHeight = anchors.map { MonthPage.height(model: model, anchor: $0, scale: model.textScale) }.max() ?? 0
             VStack(spacing: 0) {
                 MonthWeekdayHeader()
                 Divider()
-                PagedStrip(pager: pager, axis: .vertical, anchors: model.pageAnchors) { anchor in
-                    MonthPage(model: model, anchor: anchor)
+                GeometryReader { geo in
+                    ScrollView(.vertical) {
+                        PagedStrip(pager: pager, axis: .horizontal, anchors: anchors) { anchor in
+                            MonthPage(model: model, anchor: anchor)
+                        }
+                        .frame(height: max(contentHeight, geo.size.height))
+                    }
                 }
             }
-            .pagingGesture(.vertical, pager: pager) { model.step($0) }
+            .pagingGesture(.horizontal, pager: pager) { model.step($0) }
         case .list:
             PagedStrip(pager: pager, axis: .horizontal, anchors: model.pageAnchors) { anchor in
                 AgendaPage(model: model, anchor: anchor)

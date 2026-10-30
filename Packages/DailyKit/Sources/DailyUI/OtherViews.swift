@@ -69,24 +69,40 @@ struct MonthWeekdayHeader: View {
     }
 }
 
-/// 月视图的一页（一个月）。
+/// 月视图的一页（一个月）：每天列出全部日程的名称、时间和地点。
+/// 每周一行，行高随当周最忙的一天变化；整页比窗口矮时各行平均拉高填满。
 struct MonthPage: View {
     @Environment(\.uiScale) private var scale
     let model: CalendarModel
     let anchor: Date
 
+    static func rowHeights(model: CalendarModel, anchor: Date, scale: CGFloat) -> [CGFloat] {
+        let days = model.days(for: anchor)
+        return stride(from: 0, to: days.count, by: 7).map { start in
+            let most = days[start..<min(start + 7, days.count)].map { model.items(on: $0).count }.max() ?? 0
+            return max(96 * scale, (28 + CGFloat(most) * MonthEventRow.pitch) * scale + 6)
+        }
+    }
+
+    static func height(model: CalendarModel, anchor: Date, scale: CGFloat) -> CGFloat {
+        rowHeights(model: model, anchor: anchor, scale: scale).reduce(0, +)
+    }
+
     var body: some View {
         let cal = model.calendar
         let days = model.days(for: anchor)
         let month = cal.component(.month, from: anchor)
-        VStack(spacing: 0) {
-            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
-                ForEach(0..<(days.count / 7), id: \.self) { row in
-                    GridRow {
-                        ForEach(days[row * 7..<row * 7 + 7], id: \.self) { day in
+        let natural = Self.rowHeights(model: model, anchor: anchor, scale: scale)
+        GeometryReader { geo in
+            let extra = max(0, geo.size.height - natural.reduce(0, +)) / CGFloat(max(natural.count, 1))
+            VStack(spacing: 0) {
+                ForEach(natural.indices, id: \.self) { row in
+                    HStack(spacing: 0) {
+                        ForEach(days[row * 7..<min(row * 7 + 7, days.count)], id: \.self) { day in
                             cell(day, inMonth: cal.component(.month, from: day) == month)
                         }
                     }
+                    .frame(height: natural[row] + extra)
                 }
             }
         }
@@ -95,28 +111,61 @@ struct MonthPage: View {
     private func cell(_ day: Date, inMonth: Bool) -> some View {
         let items = model.items(on: day)
         let today = model.isToday(day)
-        return VStack(alignment: .leading, spacing: 2) {
+        return VStack(alignment: .leading, spacing: 2 * scale) {
             Text("\(model.calendar.component(.day, from: day))")
                 .scaledFont(12, weight: today ? .bold : .regular)
                 .foregroundStyle(today ? .white : (inMonth ? .primary : .secondary))
                 .frame(minWidth: 22 * scale, minHeight: 22 * scale)
                 .background(Circle().fill(today ? Palette.today : .clear))
-            ForEach(items.prefix(3)) { item in
-                HStack(spacing: 4) {
-                    Circle().fill(item.displayColor).frame(width: 5, height: 5)
-                    Text(item.title).lineLimit(1)
-                }
-                .scaledFont(10)
-            }
-            if items.count > 3 {
-                Text("还有 \(items.count - 3) 项").scaledFont(10).foregroundStyle(.secondary)
+                .padding(.leading, 2)
+                .frame(height: 26 * scale, alignment: .leading)
+            ForEach(items) { item in
+                MonthEventRow(item: item, calendar: model.calendar)
             }
         }
-        .padding(4)
+        .padding(.horizontal, 3)
+        .padding(.top, 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .opacity(inMonth ? 1 : 0.55)
         .overlay(alignment: .topLeading) {
             Rectangle().strokeBorder(Palette.gridLine, lineWidth: 0.5)
         }
+    }
+}
+
+/// 月视图里的一条日程：第一行名称，第二行时间和地点；点击弹出详情。
+struct MonthEventRow: View {
+    /// 每条日程占的高度（含间距），未乘缩放。
+    static let pitch: CGFloat = 36
+
+    @Environment(\.uiScale) private var scale
+    let item: CalendarItem
+    let calendar: Calendar
+    @State private var showingDetail = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(item.title)
+                .scaledFont(11, weight: .semibold)
+                .lineLimit(1)
+            Text([item.timeText(calendar: calendar, compact: true), item.location].compactMap { $0 }.joined(separator: " "))
+                .scaledFont(10)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 5)
+        .frame(maxWidth: .infinity, minHeight: (Self.pitch - 2) * scale, maxHeight: (Self.pitch - 2) * scale,
+               alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 4).fill(item.displayTint))
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1).fill(item.displayColor).frame(width: 2.5).padding(.vertical, 4)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { showingDetail = true }
+        .popover(isPresented: $showingDetail, arrowEdge: .trailing) {
+            EventDetailView(item: item, calendar: calendar)
+        }
+        .help([item.title, item.timeText(calendar: calendar), item.location].compactMap { $0 }.joined(separator: "\n"))
     }
 }
 

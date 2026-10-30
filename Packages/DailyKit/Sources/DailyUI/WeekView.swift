@@ -160,7 +160,7 @@ private struct DayColumn: View {
                 if isToday { Palette.todayColumn }
                 ForEach(DayLayout.layout(items)) { placed in
                     let frame = frame(for: placed, in: interval, width: geo.size.width)
-                    EventBlock(item: placed.item, size: frame.size, isStacked: placed.isStacked, calendar: model.calendar)
+                    EventBlock(item: placed.item, size: frame.size, calendar: model.calendar)
                         .frame(width: frame.width, height: frame.height)
                         .offset(x: frame.minX, y: frame.minY)
                 }
@@ -194,53 +194,45 @@ private struct DayColumn: View {
     }
 }
 
-/// 周 / 日视图里的一个日程块。窄的时候省掉圆点和时间、标题换行；点击弹出详情。
+/// 周 / 日视图里的一个日程块：标题、时间、地点依次排列并自动换行，放不下的部分截掉；点击弹出详情。
 private struct EventBlock: View {
     @Environment(\.uiScale) private var scale
     let item: CalendarItem
     let size: CGSize
-    /// 压在别的日程上面：用不透明背景和描边把两块分开。
-    let isStacked: Bool
     let calendar: Calendar
     @State private var showingDetail = false
 
     var body: some View {
-        let narrow = size.width < 72 * scale
+        // 窄块（重叠并排时）省掉圆点、字号略小、时间写成紧凑格式。
+        let compact = size.width < 96 * scale
         let shape = RoundedRectangle(cornerRadius: 6)
         VStack(alignment: .leading, spacing: 1) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                if !narrow {
+                if !compact {
                     Circle().fill(item.displayColor).frame(width: 6, height: 6)
                 }
                 Text(item.title)
-                    .scaledFont(narrow ? 11 : 12, weight: .semibold)
-                    .lineLimit(narrow ? 4 : 2)
+                    .scaledFont(compact ? 11 : 12, weight: .semibold)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            if !narrow, size.height >= 44 * scale {
-                Text(item.timeText(calendar: calendar))
-                    .scaledFont(11)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            // 时间不在中间断行：放不下完整时段时只显示开始时间。
+            ViewThatFits(in: .horizontal) {
+                Text(item.timeText(calendar: calendar, compact: compact)).fixedSize()
+                Text(item.start.formatted("H:mm", calendar: calendar)).fixedSize()
             }
-            if !narrow, size.height >= 60 * scale, let location = item.location {
+            .scaledFont(compact ? 10 : 11)
+            .foregroundStyle(.secondary)
+            if let location = item.location {
                 Text(location)
-                    .scaledFont(11)
+                    .scaledFont(compact ? 10 : 11)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal, narrow ? 4 : 7)
+        .padding(.horizontal, compact ? 4 : 7)
         .padding(.vertical, 3)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background {
-            shape.fill(Color(nsColor: .textBackgroundColor))
-            shape.fill(item.displayTint)
-        }
-        .overlay {
-            if isStacked {
-                shape.strokeBorder(Color(nsColor: .textBackgroundColor), lineWidth: 1.5)
-            }
-        }
+        .background(shape.fill(item.displayTint))
         .clipShape(shape)
         .contentShape(shape)
         .onTapGesture { showingDetail = true }
@@ -252,11 +244,12 @@ private struct EventBlock: View {
 }
 
 extension CalendarItem {
-    func timeText(calendar: Calendar) -> String {
+    /// 「13:30 – 15:05」；`compact` 时去掉空格，窄处更容易放下。
+    func timeText(calendar: Calendar, compact: Bool = false) -> String {
         if isAllDay { return "全天" }
         let start = start.formatted("H:mm", calendar: calendar)
         guard let end else { return start }
-        return "\(start) – \(end.formatted("H:mm", calendar: calendar))"
+        return start + (compact ? "-" : " – ") + end.formatted("H:mm", calendar: calendar)
     }
 }
 
