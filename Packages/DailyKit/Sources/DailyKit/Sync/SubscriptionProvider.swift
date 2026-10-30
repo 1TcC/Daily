@@ -2,7 +2,8 @@ import Foundation
 
 /// 把本地录入的订阅按周期展开成全天的「续费」条目。
 public struct SubscriptionProvider: SourceProvider {
-    public let sourceID = "subscriptions"
+    public static let id = "subscriptions"
+    public let sourceID = SubscriptionProvider.id
     public let kind = SourceKind.subscription
     public let displayName = SourceKind.subscription.displayName
     private let store: ItemStore

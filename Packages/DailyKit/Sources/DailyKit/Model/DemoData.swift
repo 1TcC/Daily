@@ -2,6 +2,35 @@ import Foundation
 
 /// 开发预览和截图用的示例数据，围绕给定日期所在的一周生成。
 public enum DemoData {
+    /// 示例订阅写在 notes 里的标记，用来和真实订阅区分。
+    static let marker = "示例数据"
+    /// 早期版本写入的示例订阅没有标记，按名称和价格识别。
+    private static let legacySubscriptions: Set<String> = ["iCloud+#21", "音乐会员#15", "AI 助手#140"]
+
+    /// 清除示例数据：示例日程（来源 demo-*）、示例订阅及其续费条目。真实来源的数据不受影响。
+    /// 返回删除的日程条数。
+    @discardableResult
+    public static func clear(from store: ItemStore) throws -> Int {
+        var removed = try store.deleteItems(sourceID: "demo-", prefix: true)
+        let demoSubs = try store.subscriptions().filter {
+            $0.notes == marker || legacySubscriptions.contains("\($0.name)#\($0.price)")
+        }
+        for sub in demoSubs { try store.deleteSubscription(id: sub.id) }
+        if !demoSubs.isEmpty {
+            // 续费条目由订阅生成，删掉后由下一次同步按剩下的真实订阅重新生成。
+            removed += try store.deleteItems(sourceID: SubscriptionProvider.id)
+        }
+        return removed
+    }
+
+    public static func hasDemoData(in store: ItemStore) -> Bool {
+        let demoItems = (try? store.itemCount(sourceID: "demo-", prefix: true)) ?? 0
+        let demoSubs = (try? store.subscriptions())?.contains {
+            $0.notes == marker || legacySubscriptions.contains("\($0.name)#\($0.price)")
+        } ?? false
+        return demoItems > 0 || demoSubs
+    }
+
     public static func seed(_ store: ItemStore, around now: Date = .now, calendar: Calendar = .mondayFirst) throws {
         let weekStart = calendar.startOfWeek(for: now)
         func at(_ day: Int, _ hour: Double) -> Date {
@@ -47,11 +76,11 @@ public enum DemoData {
                 metadata: ["from": "微信 · 班级群"])
 
         let firstBilling = calendar.date(byAdding: .month, value: -3, to: at(6, 0))!
-        try store.save(Subscription(name: "iCloud+", price: 21, cycle: .monthly, firstBillingDate: firstBilling))
+        try store.save(Subscription(name: "iCloud+", price: 21, cycle: .monthly, firstBillingDate: firstBilling, notes: marker))
         try store.save(Subscription(name: "音乐会员", price: 15, cycle: .monthly,
-                                    firstBillingDate: calendar.date(byAdding: .day, value: -1, to: firstBilling)!))
+                                    firstBillingDate: calendar.date(byAdding: .day, value: -1, to: firstBilling)!, notes: marker))
         try store.save(Subscription(name: "AI 助手", price: 140, cycle: .monthly,
-                                    firstBillingDate: calendar.date(byAdding: .day, value: 18, to: firstBilling)!))
+                                    firstBillingDate: calendar.date(byAdding: .day, value: 18, to: firstBilling)!, notes: marker))
         let range = DateInterval(start: calendar.date(byAdding: .month, value: -1, to: weekStart)!,
                                  end: calendar.date(byAdding: .month, value: 2, to: weekStart)!)
         let renewals = try SubscriptionProvider(store: store).items(in: range)

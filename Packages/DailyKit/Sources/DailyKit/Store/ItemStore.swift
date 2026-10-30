@@ -92,6 +92,20 @@ public final class ItemStore: Sendable {
         try db.execute("DELETE FROM items WHERE id = ?", [.text(id.uuidString)])
     }
 
+    /// 某个来源的条目数；`prefix` 为 true 时匹配以 `sourceID` 开头的所有来源。
+    public func itemCount(sourceID: String, prefix: Bool = false) throws -> Int {
+        let match = prefix ? "\(sourceID)%" : sourceID
+        return Int(try db.query("SELECT COUNT(*) AS n FROM items WHERE sourceID LIKE ?", [.text(match)]).first?.int("n") ?? 0)
+    }
+
+    /// 删除某个来源的全部条目，返回删除条数。
+    @discardableResult
+    public func deleteItems(sourceID: String, prefix: Bool = false) throws -> Int {
+        let count = try itemCount(sourceID: sourceID, prefix: prefix)
+        try db.execute("DELETE FROM items WHERE sourceID LIKE ?", [.text(prefix ? "\(sourceID)%" : sourceID)])
+        return count
+    }
+
     /// 用某个来源在 `range` 内的完整快照替换库中旧数据：
     /// 按 externalID 更新已有条目（保留原 id 和用户的忽略操作），插入新条目，删除快照中已消失的条目。
     public func replaceSnapshot(sourceID: String, in range: DateInterval, with items: [CalendarItem]) throws {

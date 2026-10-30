@@ -153,3 +153,25 @@ private struct StubProvider: SourceProvider {
         #expect(await engine.lastSynced["ok"] != nil)
     }
 }
+
+@Suite struct DemoDataTests {
+    @Test func clearRemovesOnlyDemoData() throws {
+        let store = try ItemStore.inMemory()
+        try DemoData.seed(store)
+        let real = CalendarItem(sourceKind: .systemCalendar, sourceID: "system-calendar", externalID: "r",
+                                title: "真实日程", start: .now, end: .now.addingTimeInterval(3600))
+        try store.save(real)
+        try store.save(Subscription(name: "真实订阅", price: 30, cycle: .monthly, firstBillingDate: .now))
+        // 早期版本写入的、没有标记的示例订阅也要能识别
+        try store.save(Subscription(name: "iCloud+", price: 21, cycle: .monthly, firstBillingDate: .now))
+        #expect(DemoData.hasDemoData(in: store))
+
+        let removed = try DemoData.clear(from: store)
+        #expect(removed > 0)
+        #expect(!DemoData.hasDemoData(in: store))
+        #expect(try store.itemCount(sourceID: "demo-", prefix: true) == 0)
+        #expect(try store.pendingItems().isEmpty)
+        #expect(try store.subscriptions().map(\.name) == ["真实订阅"])
+        #expect(try store.item(id: real.id)?.title == "真实日程")
+    }
+}

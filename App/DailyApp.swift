@@ -111,6 +111,13 @@ final class AppServices {
         WidgetCenter.shared.reloadAllTimelines()
     }
 
+    func clearDemoData() {
+        try? DemoData.clear(from: store)
+        model.reload()
+        // 重新同步，按剩下的真实订阅重新生成续费条目。
+        Task { await syncNow() }
+    }
+
     func loadDemoData() {
         try? DemoData.seed(store)
         model.reload()
@@ -137,6 +144,7 @@ struct DailyApp: App {
                     .keyboardShortcut("r")
                 Divider()
                 Button("载入示例数据") { services.loadDemoData() }
+                Button("清除示例数据") { services.clearDemoData() }
             }
         }
     }
