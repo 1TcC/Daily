@@ -53,7 +53,7 @@ public struct UpcomingWidgetView: View {
     }
 
     private var todayColumn: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 22) {
             DateBlock(date: snapshot.date)
             DayStack(days: [today], showHeaders: false, emptyText: "今天无日程")
         }
@@ -91,7 +91,7 @@ private struct DateBlock: View {
     var body: some View {
         HStack(alignment: .center, spacing: 7) {
             Text("\(cal.component(.day, from: date))")
-                .font(.system(size: 38, weight: .regular))
+                .font(.system(size: 32, weight: .regular))
                 .monospacedDigit()
                 .fixedSize()
             divider
@@ -103,11 +103,11 @@ private struct DateBlock: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Palette.today)
         }
-        .frame(height: 44)
+        .frame(height: 38)
     }
 
     private var divider: some View {
-        Rectangle().fill(.secondary.opacity(0.3)).frame(width: 1, height: 28)
+        Rectangle().fill(.secondary.opacity(0.3)).frame(width: 1, height: 26)
     }
 }
 
@@ -147,6 +147,7 @@ private struct DayStack: View {
 
     /// 选出能完整放下的若干天，以及样式；第一天连紧凑样式都放不下时才截断。
     static func plan(_ days: [DayAgenda], showHeaders: Bool, available: CGFloat) -> (days: [DayAgenda], compact: Bool, truncate: Int?) {
+        let days = days.filter { !$0.items.isEmpty }
         guard !days.isEmpty else { return ([], false, nil) }
         for compact in [false, true] {
             var chosen: [DayAgenda] = []
@@ -171,7 +172,7 @@ private struct DayStack: View {
         GeometryReader { geo in
             let plan = Self.plan(days, showHeaders: showHeaders, available: geo.size.height)
             VStack(alignment: .leading, spacing: Self.spacing) {
-                if days.isEmpty, let emptyText {
+                if days.allSatisfy({ $0.items.isEmpty }), let emptyText {
                     Text(emptyText).font(.system(size: 11)).foregroundStyle(.secondary).padding(.top, 2)
                 }
                 ForEach(Array(plan.days.enumerated()), id: \.element.id) { index, day in
@@ -199,7 +200,7 @@ private struct DayStack: View {
         if let truncate = plan.truncate, let first = plan.days.first, first.items.count > truncate {
             return "这天还有 \(first.items.count - truncate) 项"
         }
-        let hiddenDays = days.count - plan.days.count
+        let hiddenDays = days.filter { !$0.items.isEmpty }.count - plan.days.count
         return hiddenDays > 0 ? "之后还有 \(hiddenDays) 天的安排" : nil
     }
 }
@@ -216,9 +217,11 @@ private struct EventCard: View {
                 .lineLimit(1)
             Text([item.timeText(calendar: cal), item.location].compactMap { $0 }.joined(separator: " · "))
                 .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+                .opacity(0.85)
                 .lineLimit(1)
         }
+        // 和系统日历一样，文字用日程本身的颜色
+        .foregroundStyle(item.displayColor)
         .padding(.vertical, 2.5)
         .padding(.leading, 9)
         .padding(.trailing, 5)
@@ -226,7 +229,7 @@ private struct EventCard: View {
         // 色条放在背景里，不参与布局，卡片高度固定
         .background(alignment: .leading) {
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 5).fill(item.displayColor.opacity(0.16))
+                RoundedRectangle(cornerRadius: 5).fill(item.displayColor.opacity(0.11))
                 RoundedRectangle(cornerRadius: 1.5).fill(item.displayColor).frame(width: 3)
                     .padding(.vertical, 4).padding(.leading, 3)
             }
