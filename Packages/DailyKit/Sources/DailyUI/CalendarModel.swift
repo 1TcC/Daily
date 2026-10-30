@@ -69,7 +69,10 @@ public final class CalendarModel {
     public var calendarAccess: CalendarAccess = .notDetermined
     public var systemCalendars: [SystemCalendarInfo] = []
     public var excludedCalendarIDs: Set<String> = []
-    public var systemCalendarsExpanded = true
+    /// 系统日历子列表是否展开；默认收起，记住用户的选择。
+    public var systemCalendarsExpanded = Preferences.shared.systemCalendarsExpanded {
+        didSet { Preferences.shared.systemCalendarsExpanded = systemCalendarsExpanded }
+    }
     public private(set) var items: [CalendarItem] = []
     public private(set) var pending: [CalendarItem] = []
     public private(set) var loadError: String?

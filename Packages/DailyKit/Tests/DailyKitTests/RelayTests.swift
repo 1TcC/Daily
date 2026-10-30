@@ -76,9 +76,9 @@ import Testing
         #expect(e.clientName == "Grok")
         e.client = "muse"
         #expect(e.clientName == "Muse")
-        e.client = "claude"
-        #expect(e.clientName == "Claude")
-        #expect(AgentRelaySource.item(from: e, calendar: .mondayFirst)?.metadata["via"] == "Claude")
+        e.client = "assistant"
+        #expect(e.clientName == "Assistant")
+        #expect(AgentRelaySource.item(from: e, calendar: .mondayFirst)?.metadata["via"] == "Assistant")
 
         let c = RelayConnection(string: "https://r.example.dev/s3cret")!
         #expect(c.mcpURL(for: "grok").absoluteString == "https://r.example.dev/s3cret/mcp")

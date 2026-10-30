@@ -20,6 +20,12 @@ public struct Preferences: Sendable {
         nonmutating set { defaults.set(newValue, forKey: "textScale") }
     }
 
+    /// 侧边栏「系统日历」下的日历列表是否展开（默认收起）。
+    public var systemCalendarsExpanded: Bool {
+        get { defaults.bool(forKey: "systemCalendarsExpanded") }
+        nonmutating set { defaults.set(newValue, forKey: "systemCalendarsExpanded") }
+    }
+
     /// 教务系统网址（导入课表时打开）。
     public var courseSiteURL: String {
         get { defaults.string(forKey: "courseSiteURL") ?? "https://classes.tju.edu.cn/eams/homeExt.action" }

@@ -9,7 +9,7 @@ out=$(npx wrangler deploy 2>&1) || { print -r -- "$out"; exit 1; }
 url=$(print -r -- "$out" | grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' | head -1)
 if [[ -z "$url" ]]; then
   print -r -- "$out"
-  echo "没有找到部署地址，请把上面的输出发给 Claude。"
+  echo "没有找到部署地址，请检查上面的输出。"
   exit 1
 fi
 echo "   已部署：$url"
@@ -27,7 +27,7 @@ for i in {1..10}; do
   sleep 3
 done
 if [[ $ok -ne 1 ]]; then
-  echo "服务没有正常响应，请把这段输出发给 Claude。"
+  echo "服务没有正常响应，请检查部署是否成功。"
   exit 1
 fi
 echo "   MCP 工具已就绪"
