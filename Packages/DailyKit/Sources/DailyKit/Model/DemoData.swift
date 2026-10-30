@@ -66,6 +66,10 @@ public enum DemoData {
         try add(.parcel, 3, 16, nil, "快递待取件", location: "驿站", metadata: ["pickupCode": "6-2-1043"])
         try add(.agent, 3, 19 + 35.0 / 60, 21 + 35.0 / 60, "编程比赛", location: "线上")
         try add(.systemCalendar, 4, 15, 16, "小组讨论", location: "图书馆 3F")
+        // 重叠的日程：错开开始（叠放）和几乎同时开始（并排）
+        try add(.systemCalendar, 1, 13, 13.75, "英语角", location: "外语楼大厅")
+        try add(.course, 1, 13.5, 15 + 5.0 / 60, "概率论", location: "33楼310")
+        try add(.message, 4, 15 + 5.0 / 60, 15 + 50.0 / 60, "答疑", location: "线上")
         try add(.travel, 5, 8.25, 12 + 43.0 / 60, "G1234 上海虹桥 → 北京南",
                 location: "05车 12F", metadata: ["gate": "B12"])
         try add(.systemCalendar, 6, 14, 16, "看展", location: "美术馆")

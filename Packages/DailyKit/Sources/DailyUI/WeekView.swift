@@ -160,7 +160,7 @@ private struct DayColumn: View {
                 if isToday { Palette.todayColumn }
                 ForEach(DayLayout.layout(items)) { placed in
                     let frame = frame(for: placed, in: interval, width: geo.size.width)
-                    EventBlock(item: placed.item, height: frame.height, calendar: model.calendar)
+                    EventBlock(item: placed.item, size: frame.size, isStacked: placed.isStacked, calendar: model.calendar)
                         .frame(width: frame.width, height: frame.height)
                         .offset(x: frame.minX, y: frame.minY)
                 }
@@ -186,51 +186,115 @@ private struct DayColumn: View {
         let top = y(for: start, in: interval) + 1
         let height = max(20, y(for: end, in: interval) - top - 1)
         let inset: CGFloat = 3
-        let columnWidth = (width - inset * 2) / CGFloat(placed.columns)
-        return CGRect(x: inset + columnWidth * CGFloat(placed.column), y: top,
-                      width: columnWidth - (placed.columns > 1 ? 2 : 0), height: height)
+        let usable = width - inset * 2
+        let x = inset + usable * placed.x
+        // 并排时相邻两块之间留 2pt 缝隙
+        let gap: CGFloat = placed.x + placed.width < 0.999 ? 2 : 0
+        return CGRect(x: x, y: top, width: usable * placed.width - gap, height: height)
     }
 }
 
+/// 周 / 日视图里的一个日程块。窄的时候省掉圆点和时间、标题换行；点击弹出详情。
 private struct EventBlock: View {
     @Environment(\.uiScale) private var scale
     let item: CalendarItem
-    let height: CGFloat
+    let size: CGSize
+    /// 压在别的日程上面：用不透明背景和描边把两块分开。
+    let isStacked: Bool
     let calendar: Calendar
+    @State private var showingDetail = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 5) {
-                Circle().fill(item.displayColor).frame(width: 6, height: 6)
+        let narrow = size.width < 72 * scale
+        let shape = RoundedRectangle(cornerRadius: 6)
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                if !narrow {
+                    Circle().fill(item.displayColor).frame(width: 6, height: 6)
+                }
                 Text(item.title)
-                    .scaledFont(12, weight: .semibold)
-                    .lineLimit(1)
+                    .scaledFont(narrow ? 11 : 12, weight: .semibold)
+                    .lineLimit(narrow ? 4 : 2)
             }
-            if height >= 40 * scale {
-                Text(timeText)
+            if !narrow, size.height >= 44 * scale {
+                Text(item.timeText(calendar: calendar))
                     .scaledFont(11)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            if height >= 56 * scale, let location = item.location {
+            if !narrow, size.height >= 60 * scale, let location = item.location {
                 Text(location)
                     .scaledFont(11)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
         }
-        .padding(.horizontal, 7)
+        .padding(.horizontal, narrow ? 4 : 7)
         .padding(.vertical, 3)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(item.displayTint))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .help(item.title)
+        .background {
+            shape.fill(Color(nsColor: .textBackgroundColor))
+            shape.fill(item.displayTint)
+        }
+        .overlay {
+            if isStacked {
+                shape.strokeBorder(Color(nsColor: .textBackgroundColor), lineWidth: 1.5)
+            }
+        }
+        .clipShape(shape)
+        .contentShape(shape)
+        .onTapGesture { showingDetail = true }
+        .popover(isPresented: $showingDetail, arrowEdge: .trailing) {
+            EventDetailView(item: item, calendar: calendar)
+        }
+        .help([item.title, item.timeText(calendar: calendar), item.location].compactMap { $0 }.joined(separator: "\n"))
+    }
+}
+
+extension CalendarItem {
+    func timeText(calendar: Calendar) -> String {
+        if isAllDay { return "全天" }
+        let start = start.formatted("H:mm", calendar: calendar)
+        guard let end else { return start }
+        return "\(start) – \(end.formatted("H:mm", calendar: calendar))"
+    }
+}
+
+/// 点击日程后弹出的详情。
+struct EventDetailView: View {
+    let item: CalendarItem
+    let calendar: Calendar
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle().fill(item.displayColor).frame(width: 9, height: 9)
+                Text(item.title).font(.system(size: 15, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                row("clock", "\(item.start.formatted("M月d日 EEE", calendar: calendar))  \(item.timeText(calendar: calendar))")
+                if let location = item.location { row("mappin.and.ellipse", location) }
+                if let teacher = item.metadata["teacher"] { row("person", teacher) }
+                if let weeks = item.metadata["weeks"], !weeks.isEmpty {
+                    row("calendar", [item.metadata["units"], weeks].compactMap { $0 }.joined(separator: " · "))
+                }
+                if let code = item.metadata["pickupCode"] { row("number", "取件码 \(code)") }
+                if let notes = item.notes, notes != item.metadata["teacher"] { row("text.alignleft", notes) }
+                row(item.sourceKind.symbol, [item.sourceKind.displayName, item.metadata["calendarTitle"]]
+                    .compactMap { $0 }.joined(separator: " · "))
+            }
+            .font(.system(size: 12))
+        }
+        .padding(14)
+        .frame(width: 280, alignment: .leading)
     }
 
-    private var timeText: String {
-        let start = item.start.formatted("H:mm", calendar: calendar)
-        guard let end = item.end else { return start }
-        return "\(start) – \(end.formatted("H:mm", calendar: calendar))"
+    private func row(_ symbol: String, _ text: String) -> some View {
+        Label {
+            Text(text).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+        } icon: {
+            Image(systemName: symbol).foregroundStyle(.secondary).frame(width: 16)
+        }
     }
 }
 
