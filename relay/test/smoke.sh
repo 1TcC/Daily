@@ -119,3 +119,17 @@ CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE/mcp")"
 echo
 echo "通过 $PASS，失败 $FAIL"
 [ "$FAIL" = "0" ]
+
+# ---- 多个 AI 区分来源（追加检查） ----
+muse() { curl -s -X POST "$BASE/mcp/muse" -H 'Content-Type: application/json' -d "$1"; }
+grok() { curl -s -X POST "$BASE/mcp" -H 'Content-Type: application/json' -d "$1"; }
+r=$(muse '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_event","arguments":{"title":"Muse 测试","start":"2026-12-02 09:00"}}}')
+mid=$(printf '%s' "$r" | python3 -c 'import sys,json; print(json.loads(json.load(sys.stdin)["result"]["content"][0]["text"])["id"])')
+printf '%s' "$r" | grep -q '\\"source\\":\\"Muse\\"' && echo "PASS  Muse 创建的日程来源为 Muse" || { echo "FAIL  Muse 来源"; exit 1; }
+r=$(grok "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"update_event\",\"arguments\":{\"id\":\"$mid\",\"title\":\"x\"}}}")
+printf '%s' "$r" | grep -q '"isError":true' && echo "PASS  Grok 不能修改 Muse 的日程" || { echo "FAIL  越权修改"; exit 1; }
+r=$(grok '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_events","arguments":{"start_date":"2026-12-02"}}}')
+printf '%s' "$r" | grep -q 'Muse 测试' && printf '%s' "$r" | grep -q '\\"editable\\":false' && echo "PASS  Grok 能看到 Muse 的日程（只读）" || { echo "FAIL  可见性"; exit 1; }
+r=$(muse "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"delete_event\",\"arguments\":{\"id\":\"$mid\"}}}")
+printf '%s' "$r" | grep -q '\\"deleted\\":true' && echo "PASS  Muse 能删除自己的日程" || { echo "FAIL  Muse 删除"; exit 1; }
+curl -s "$BASE/sync/agent-events" | grep -q '"client":"muse"' && echo "PASS  同步接口带 client 字段" || { echo "FAIL  client 字段"; exit 1; }

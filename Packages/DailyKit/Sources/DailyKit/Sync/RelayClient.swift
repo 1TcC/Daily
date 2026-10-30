@@ -15,7 +15,13 @@ public struct RelayConnection: Sendable, Equatable {
         baseURL = url
     }
 
+    /// Grok 用的连接器地址（旧地址，保持不变）。
     public var mcpURL: URL { baseURL.appendingPathComponent("mcp") }
+
+    /// 其他 AI 的连接器地址：`/mcp/<名字>`，中转服务据此区分来源和编辑权限。
+    public func mcpURL(for client: String) -> URL {
+        client == "grok" ? mcpURL : mcpURL.appendingPathComponent(client)
+    }
     var agentEventsURL: URL { baseURL.appendingPathComponent("sync/agent-events") }
     var snapshotURL: URL { baseURL.appendingPathComponent("sync/snapshot") }
 }
@@ -31,6 +37,17 @@ public struct RelayAgentEvent: Codable, Sendable, Equatable {
     public var notes: String?
     public var updatedAt: String?
     public var deleted: Bool?
+    /// 创建它的 AI（grok、muse…）；旧数据没有，视为 grok。
+    public var client: String?
+
+    /// 显示用的名字。
+    public var clientName: String {
+        switch client ?? "grok" {
+        case "grok": "Grok"
+        case "muse": "Muse"
+        case let other: other.prefix(1).uppercased() + other.dropFirst()
+        }
+    }
 }
 
 /// 上传给中转服务、供 Grok 查询的日程快照条目。
@@ -162,7 +179,7 @@ public struct AgentRelaySource: SourceProvider {
     public static let id = "agent-relay"
     public let sourceID = AgentRelaySource.id
     public let kind = SourceKind.agent
-    public let displayName = "Grok"
+    public let displayName = "AI 助手"
     public let client: RelayClient
 
     public init(client: RelayClient) {
@@ -191,7 +208,7 @@ public struct AgentRelaySource: SourceProvider {
             start: start,
             end: end,
             isAllDay: allDay,
-            metadata: ["relayID": event.id, "via": "Grok"]
+            metadata: ["relayID": event.id, "via": event.clientName]
         )
     }
 }

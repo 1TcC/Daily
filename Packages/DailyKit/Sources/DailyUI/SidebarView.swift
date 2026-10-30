@@ -142,44 +142,53 @@ private struct SystemCalendarList: View {
     }
 }
 
-/// 「Agent / Bot 写入」下面：Grok 连接状态，复制连接器地址（地址里带密钥，不在界面上明文显示）。
+/// 「Agent / Bot 写入」下面：AI 连接状态，复制各个 AI 的连接器地址（地址里带密钥，不在界面上明文显示）。
 private struct GrokRelayEntry: View {
     let model: CalendarModel
     @Environment(\.uiScale) private var scale
-    @State private var copied = false
+    @State private var copied: String?
+
+    /// 已接入的 AI：显示名和连接器路径里的名字。
+    private let clients = [("Grok", "grok"), ("Muse", "muse")]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
             if let relay = model.relay {
                 HStack(spacing: 5) {
                     Circle().fill(relay.error == nil ? Color.green : Color.orange).frame(width: 6, height: 6)
-                    Text(relay.error ?? "Grok 已连接 · " + (relay.isLive ? "实时" : relay.lastSync.map { "\($0.formatted("H:mm")) 同步" } ?? "连接中"))
+                    Text(relay.error ?? "AI 已连接 · " + (relay.isLive ? "实时" : relay.lastSync.map { "\($0.formatted("H:mm")) 同步" } ?? "连接中"))
                         .lineLimit(2)
                 }
                 .scaledFont(11)
                 .foregroundStyle(.secondary)
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(relay.mcpURL.absoluteString, forType: .string)
-                    copied = true
-                    Task { try? await Task.sleep(for: .seconds(2)); copied = false }
-                } label: {
-                    Label(copied ? "已复制" : "复制 Grok 连接器地址", systemImage: copied ? "checkmark" : "doc.on.doc")
-                        .scaledFont(11)
-                        .foregroundStyle(SourceKind.agent.color)
-                }
-                .buttonStyle(.plain)
-                .help("粘贴到 grok.com/connectors 的自定义连接器里。地址里含密钥，不要发给别人。")
-                .contextMenu {
-                    Button("立即同步") { model.actions.syncRelay() }
-                    Button("断开 Grok", role: .destructive) { model.actions.disconnectRelay() }
+                ForEach(clients, id: \.1) { name, client in
+                    Button {
+                        let url = client == "grok" ? relay.mcpURL : relay.mcpURL.appendingPathComponent(client)
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                        copied = client
+                        Task { try? await Task.sleep(for: .seconds(2)); if copied == client { copied = nil } }
+                    } label: {
+                        Label(copied == client ? "已复制" : "复制 \(name) 连接器地址",
+                              systemImage: copied == client ? "checkmark" : "doc.on.doc")
+                            .scaledFont(11)
+                            .foregroundStyle(SourceKind.agent.color)
+                    }
+                    .buttonStyle(.plain)
+                    .help("粘贴到 \(name) 的自定义 MCP 连接器里。地址里含密钥，不要发给别人。")
                 }
             } else {
-                Text("未连接 Grok").scaledFont(11).foregroundStyle(.secondary)
+                Text("未连接 AI 助手").scaledFont(11).foregroundStyle(.secondary)
             }
         }
         .padding(.leading, 29)
         .padding(.vertical, 2)
+        .contextMenu {
+            if model.relay != nil {
+                Button("立即同步") { model.actions.syncRelay() }
+                Button("断开 AI 助手", role: .destructive) { model.actions.disconnectRelay() }
+            }
+        }
     }
 }
 

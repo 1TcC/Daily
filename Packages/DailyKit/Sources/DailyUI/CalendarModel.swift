@@ -13,6 +13,7 @@ public enum ViewMode: String, CaseIterable, Identifiable, Sendable {
 
 /// 与 Grok 中转服务的连接状态。
 public struct RelayStatus: Sendable {
+    /// Grok 的连接器地址；其他 AI 在后面加 `/<名字>`。
     public var mcpURL: URL
     public var lastSync: Date?
     public var error: String?

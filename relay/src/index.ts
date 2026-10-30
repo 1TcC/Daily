@@ -46,6 +46,8 @@ interface AgentEvent {
   created_at: string;
   updated_at: string;
   deleted: boolean;
+  /** 创建它的 AI（连接器路径 /mcp/<client>）；旧数据没有该字段，视为 grok。 */
+  client?: string;
 }
 interface SnapshotEvent {
   title: string;
@@ -71,6 +73,12 @@ const MAX_SNAPSHOT_BYTES = 1_900_000; // DO 单个 value 上限约 2MB
 const MAX_RANGE_DAYS = 120;
 const TOMBSTONE_MS = 30 * 24 * 3600 * 1000;
 const DAY_MS = 24 * 3600 * 1000;
+
+/** 旧连接器地址 /mcp 对应的调用方。 */
+const DEFAULT_CLIENT = "grok";
+const CLIENT_NAMES: Record<string, string> = { grok: "Grok", muse: "Muse" };
+const clientOf = (ev: AgentEvent) => ev.client ?? DEFAULT_CLIENT;
+const clientName = (client: string) => CLIENT_NAMES[client] ?? client.charAt(0).toUpperCase() + client.slice(1);
 
 // ---------- Worker 入口 ----------
 
@@ -370,8 +378,10 @@ export class DailyStore {
   async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
     const method = request.method;
-    if (path === "/mcp") {
-      if (method === "POST") return this.handleMcp(request);
+    // /mcp 是 Grok 的旧地址；其他 AI 用 /mcp/<名字>（小写字母、数字、连字符），据此区分来源和编辑权限
+    const mcp = path.match(/^\/mcp(?:\/([a-z0-9-]{1,20}))?$/);
+    if (mcp) {
+      if (method === "POST") return this.handleMcp(request, mcp[1] ?? DEFAULT_CLIENT);
       return new Response(null, { status: 405, headers: { Allow: "POST, OPTIONS" } });
     }
     if (path === "/sync/agent-events") {
@@ -493,7 +503,7 @@ export class DailyStore {
 
   // ----- MCP -----
 
-  private async handleMcp(request: Request): Promise<Response> {
+  private async handleMcp(request: Request, caller: string): Promise<Response> {
     let body: unknown;
     try {
       body = JSON.parse(await request.text());
@@ -506,17 +516,17 @@ export class DailyStore {
       }
       const out: Json[] = [];
       for (const item of body) {
-        const r = await this.handleRpc(item);
+        const r = await this.handleRpc(item, caller);
         if (r) out.push(r);
       }
       return out.length ? json(out) : new Response(null, { status: 202 });
     }
-    const r = await this.handleRpc(body);
+    const r = await this.handleRpc(body, caller);
     return r ? json(r) : new Response(null, { status: 202 });
   }
 
   /** 处理单个 JSON-RPC 消息；通知 / 客户端响应返回 null。 */
-  private async handleRpc(msg: unknown): Promise<Json | null> {
+  private async handleRpc(msg: unknown, caller: string): Promise<Json | null> {
     const err = (id: unknown, code: number, message: string) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
     if (!msg || typeof msg !== "object" || Array.isArray(msg)) return err(null, -32600, "Invalid Request");
     const m = msg as { id?: unknown; method?: unknown; params?: unknown };
@@ -538,7 +548,7 @@ export class DailyStore {
           protocolVersion,
           capabilities: { tools: {} },
           serverInfo: { name: "daily", version: "1.0.0" },
-          instructions: INSTRUCTIONS,
+          instructions: `${INSTRUCTIONS}\n你在 Daily 里的身份是「${clientName(caller)}」：只能修改/删除你自己创建的日程，其他 AI 创建的日程只读。`,
         });
       }
       case "ping":
@@ -554,7 +564,7 @@ export class DailyStore {
           ? params.arguments
           : {}) as Args;
         try {
-          const result = await this.callTool(name, args);
+          const result = await this.callTool(name, args, caller);
           return ok({ content: [{ type: "text", text: JSON.stringify(result) }] });
         } catch (e) {
           if (e instanceof UserError) return ok({ content: [{ type: "text", text: e.message }], isError: true });
@@ -569,27 +579,27 @@ export class DailyStore {
 
   // ----- 工具实现 -----
 
-  private async callTool(name: string, args: Args): Promise<unknown> {
+  private async callTool(name: string, args: Args, caller: string): Promise<unknown> {
     switch (name) {
       case "list_events":
-        return this.listEvents(args);
+        return this.listEvents(args, caller);
       case "add_event":
-        return this.addEvent(args);
+        return this.addEvent(args, caller);
       case "update_event":
-        return this.updateEvent(args);
+        return this.updateEvent(args, caller);
       default:
-        return this.deleteEvent(args);
+        return this.deleteEvent(args, caller);
     }
   }
 
-  private publicAgent(ev: AgentEvent, withStamps = false) {
+  private publicAgent(ev: AgentEvent, caller: string, withStamps = false) {
     const out: Record<string, unknown> = { id: ev.id, title: ev.title, start: ev.start };
     if (ev.end) out.end = ev.end;
     out.all_day = ev.all_day;
     if (ev.location) out.location = ev.location;
     if (ev.notes) out.notes = ev.notes;
-    out.source = "Grok";
-    out.editable = true;
+    out.source = clientName(clientOf(ev));
+    out.editable = clientOf(ev) === caller;
     if (withStamps) {
       out.created_at = ev.created_at;
       out.updated_at = ev.updated_at;
@@ -597,7 +607,7 @@ export class DailyStore {
     return out;
   }
 
-  private async listEvents(args: Args) {
+  private async listEvents(args: Args, caller: string) {
     const c = this.clock;
     const sd = str(args, "start_date", { required: true, max: 20 })!;
     const ed = str(args, "end_date", { max: 20 }) || sd;
@@ -628,7 +638,7 @@ export class DailyStore {
       push(e, out);
     }
     for (const e of Object.values(await this.loadAgent())) {
-      if (!e.deleted) push(e, this.publicAgent(e));
+      if (!e.deleted) push(e, this.publicAgent(e, caller));
     }
     items.sort((a, b) => a.ms - b.ms || String(a.ev.title).localeCompare(String(b.ev.title)));
     return {
@@ -641,7 +651,7 @@ export class DailyStore {
     };
   }
 
-  private async addEvent(args: Args) {
+  private async addEvent(args: Args, caller: string) {
     const title = str(args, "title", { required: true, max: 200 })!;
     const startIn = str(args, "start", { required: true, max: 40 })!;
     const endIn = str(args, "end", { max: 40 });
@@ -652,8 +662,10 @@ export class DailyStore {
 
     const agent = await this.loadAgent();
     const now = utcStamp();
-    // 同标题 + 同开始时间的未删除条目 → 更新
-    const dup = Object.values(agent).find((e) => !e.deleted && e.title === title && e.start === t.start);
+    // 自己创建的、同标题 + 同开始时间的未删除条目 → 更新
+    const dup = Object.values(agent).find(
+      (e) => !e.deleted && clientOf(e) === caller && e.title === title && e.start === t.start,
+    );
     if (dup) {
       dup.all_day = t.all_day;
       if (endIn !== undefined && endIn !== "") dup.end = t.end;
@@ -661,7 +673,7 @@ export class DailyStore {
       if (notes) dup.notes = notes;
       dup.updated_at = now;
       await this.saveAgent(agent);
-      return this.publicAgent(dup, true);
+      return this.publicAgent(dup, caller, true);
     }
     const ev: AgentEvent = {
       id: crypto.randomUUID(),
@@ -674,27 +686,31 @@ export class DailyStore {
       created_at: now,
       updated_at: now,
       deleted: false,
+      client: caller,
     };
     agent[ev.id] = ev;
     await this.saveAgent(agent);
-    return this.publicAgent(ev, true);
+    return this.publicAgent(ev, caller, true);
   }
 
   /** 取出可编辑的条目，否则抛出中文错误。 */
-  private findEditable(agent: Record<string, AgentEvent>, id: string): AgentEvent {
+  private findEditable(agent: Record<string, AgentEvent>, id: string, caller: string): AgentEvent {
     if (id.startsWith("daily:")) throw new UserError("这条日程来自用户的 Daily（课程/系统日历），只读，不能修改或删除。");
     const ev = agent[id];
     if (!ev || ev.deleted) {
       throw new UserError(`找不到 id 为「${id}」的日程。只能修改/删除你自己创建的日程（editable=true），请先用 list_events 确认 id。`);
     }
+    if (clientOf(ev) !== caller) {
+      throw new UserError(`这条日程是 ${clientName(clientOf(ev))} 创建的，只能由它修改或删除。`);
+    }
     return ev;
   }
 
-  private async updateEvent(args: Args) {
+  private async updateEvent(args: Args, caller: string) {
     const c = this.clock;
     const id = str(args, "id", { required: true, max: 100 })!;
     const agent = await this.loadAgent();
-    const ev = this.findEditable(agent, id);
+    const ev = this.findEditable(agent, id, caller);
 
     const title = str(args, "title", { max: 200 });
     if (title === "") throw new UserError("title 不能为空。");
@@ -744,13 +760,13 @@ export class DailyStore {
     }
     ev.updated_at = utcStamp();
     await this.saveAgent(agent);
-    return this.publicAgent(ev, true);
+    return this.publicAgent(ev, caller, true);
   }
 
-  private async deleteEvent(args: Args) {
+  private async deleteEvent(args: Args, caller: string) {
     const id = str(args, "id", { required: true, max: 100 })!;
     const agent = await this.loadAgent();
-    const ev = this.findEditable(agent, id);
+    const ev = this.findEditable(agent, id, caller);
     ev.deleted = true;
     ev.updated_at = utcStamp();
     await this.saveAgent(agent);

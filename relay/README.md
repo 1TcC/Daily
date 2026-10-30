@@ -48,7 +48,10 @@ Daily 上传的快照条目（只读）：
 
 ## MCP 端点
 
-`POST /<SECRET>/mcp` — MCP Streamable HTTP，JSON-RPC 2.0，响应 `application/json`（不用 SSE）。
+`POST /<SECRET>/mcp`（Grok）或 `POST /<SECRET>/mcp/<名字>`（其他 AI，如 `/mcp/muse`）— 路径决定调用方身份：
+每个 AI 只能修改/删除自己创建的日程，能看到其他 AI 创建的（只读，`source` 为对方名字）；agent event 带 `client` 字段。
+
+MCP Streamable HTTP，JSON-RPC 2.0，响应 `application/json`（不用 SSE）。
 支持 `initialize`、`notifications/*`（返回 202 空响应）、`ping`、`tools/list`、`tools/call`，以及批量请求数组。
 `GET`/`DELETE /<SECRET>/mcp` 返回 405。
 
@@ -65,6 +68,7 @@ Daily 上传的快照条目（只读）：
 
 ## Daily 同步端点
 
+- `GET /<SECRET>/sync/live` — WebSocket（休眠 API）；有 AI 改了日程就推送 `{"type":"agent-changed"}`，客户端发 `ping` 由运行时自动回 `pong`
 - `GET /<SECRET>/sync/agent-events` → `{ "events": [agent event...（含 deleted）], "now": "..." }`
 - `PUT /<SECRET>/sync/snapshot`，body `{ "events": [快照条目...], "generated_at": "ISO" }` → `{ "ok": true, "count": n }`
 

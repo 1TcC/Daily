@@ -273,7 +273,7 @@ struct EventDetailView: View {
                 }
                 if let code = item.metadata["pickupCode"] { row("number", "取件码 \(code)") }
                 if let notes = item.notes, notes != item.metadata["teacher"] { row("text.alignleft", notes) }
-                row(item.sourceKind.symbol, [item.sourceKind.displayName, item.metadata["calendarTitle"]]
+                row(item.sourceKind.symbol, [item.sourceKind.displayName, item.metadata["calendarTitle"] ?? item.metadata["via"]]
                     .compactMap { $0 }.joined(separator: " · "))
             }
             .font(.system(size: 12))
