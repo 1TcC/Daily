@@ -156,7 +156,7 @@ ORDER="EH$((10000000 + $$))"
 R="$(ing "【菜鸟驿站】您的中通包裹已到天津大学北洋园校区菜鸟驿站，请凭$CODE及时取件，有疑问联系18800000000")"
 check "ingest 取件短信 → parsed=pickup" "$R" 'd=={"ok":True,"parsed":"pickup"}'
 E="$(evs $FROM $TO)"
-check "list_events 含取件条目：来源短信、不可编辑、meta.pickup_code" "$E" "any(e['source']=='短信' and e['editable'] is False and e['kind']=='parcel' and e['meta']['pickup_code']=='$CODE' and e['title'].startswith('取件 $CODE') and e['all_day'] for e in d)"
+check "list_events 含取件条目：来源短信、不可编辑、meta.pickup_code" "$E" "any(e['source']=='短信' and e['editable'] is False and e['kind']=='parcel' and e['meta']['pickup_code']=='$CODE' and e['title'].startswith('取件 $CODE') and not e['all_day'] for e in d)"
 ing "【菜鸟驿站】您的中通包裹已到天津大学北洋园校区菜鸟驿站，请凭$CODE及时取件，有疑问联系18800000000" >/dev/null
 E="$(evs $FROM $TO)"
 check "同一短信投递两次 → 只有一条" "$E" "sum(1 for e in d if e.get('meta',{}).get('pickup_code')=='$CODE')==1"
@@ -167,12 +167,12 @@ check "丰巢取件短信 → pickup" "$R" 'd["parsed"]=="pickup"'
 SID="$(printf '%s' "$E" | py "[e['id'] for e in d if e.get('meta',{}).get('pickup_code')=='$CODE'][0]")"
 R="$(tool update_event "{\"id\":\"$SID\",\"title\":\"x\"}")"
 check "Grok 修改短信条目 → isError" "$R" 'd["result"]["isError"] is True and "短信" in d["result"]["content"][0]["text"]'
-R="$(tool delete_event "{\"id\":\"$SID\"}")"
-check "Grok 删除短信条目 → isError" "$R" 'd["result"]["isError"] is True'
-R="$(curl -sS -X POST "$BASE/mcp/sms" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"ping"}' -o /dev/null -w '%{http_code}')"
-[ "$R" = "404" ] && ok "/mcp/sms 不可作为 AI 身份" || bad "/mcp/sms 不可作为 AI 身份" "$R"
 R="$(curl -sS "$BASE/sync/agent-events")"
 check "sync/agent-events 带 client=sms、kind、meta" "$R" "any(e['client']=='sms' and e['kind']=='parcel' and e['meta']['pickup_code']=='$CODE' for e in d['events'])"
+R="$(tool delete_event "{\"id\":\"$SID\"}")"
+check "AI 可以把取件条目标记为已取（删除）" "$R" '"isError" not in d["result"]'
+R="$(curl -sS -X POST "$BASE/mcp/sms" -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"ping"}' -o /dev/null -w '%{http_code}')"
+[ "$R" = "404" ] && ok "/mcp/sms 不可作为 AI 身份" || bad "/mcp/sms 不可作为 AI 身份" "$R"
 
 # 已取件 → 条目消失
 R="$(ing "【菜鸟驿站】您的包裹$CODE已于10-30 18:20取出，如非本人操作请联系18800000000")"
@@ -267,3 +267,12 @@ SZ="$(wc -c < /tmp/smoke_f404.$$ | tr -d ' ')"; rm -f /tmp/smoke_f404.$$
 echo
 echo "通过 $PASS，失败 $FAIL"
 [ "$FAIL" = "0" ]
+
+# ---- Daily 标记已完成（DELETE /sync/agent-events/<id>） ----
+R="$(ing '【测试】您的包裹已到删除测试驿站，请凭4-4-4444取件。')"
+DID="$(curl -sS "$BASE/sync/agent-events" | py "[e['id'] for e in d['events'] if (e.get('meta') or {}).get('pickup_code')=='4-4-4444' and not e['deleted']][0]")"
+R="$(curl -sS -X DELETE "$BASE/sync/agent-events/$DID")"
+check "Daily 标记已取件" "$R" 'd["ok"] is True'
+R="$(curl -sS -X DELETE "$BASE/sync/agent-events/$DID" -o /dev/null -w '%{http_code}')"
+[ "$R" = "404" ] && ok "重复标记返回 404" || bad "重复标记返回 404" "$R"
+echo "通过 $PASS，失败 $FAIL"

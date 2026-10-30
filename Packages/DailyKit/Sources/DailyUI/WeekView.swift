@@ -257,6 +257,8 @@ extension CalendarItem {
 struct EventDetailView: View {
     let item: CalendarItem
     let calendar: Calendar
+    @Environment(\.markParcelPicked) private var markParcelPicked
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -280,6 +282,13 @@ struct EventDetailView: View {
                     .compactMap { $0 }.joined(separator: " · "))
             }
             .font(.system(size: 12))
+            if item.sourceKind == .parcel, item.metadata["pickupCode"] != nil, let markParcelPicked {
+                Button("标记为已取件") {
+                    markParcelPicked(item)
+                    dismiss()
+                }
+                .controlSize(.small)
+            }
         }
         .padding(14)
         .frame(width: 280, alignment: .leading)

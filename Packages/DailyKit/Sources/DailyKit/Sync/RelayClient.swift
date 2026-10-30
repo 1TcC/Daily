@@ -170,6 +170,16 @@ public struct RelayClient: Sendable {
         return try Self.decoder.decode(Response.self, from: data).events
     }
 
+    /// 把中转服务里的一条日程标记为已完成（例如快递已取件），中转服务会推送变更。
+    public func markDone(id: String) async throws {
+        var request = URLRequest(url: connection.agentEventsURL.appendingPathComponent(id))
+        request.httpMethod = "DELETE"
+        request.timeoutInterval = 20
+        let (_, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode == 404 { return }  // 已经被删过
+        try Self.check(response)
+    }
+
     /// 上传日程快照（Grok 查询时能看到课程、系统日历等）。
     public func uploadSnapshot(_ items: [CalendarItem], calendar: Calendar = .mondayFirst) async throws {
         try await uploadSnapshot(body: Self.snapshotBody(items, calendar: calendar))

@@ -9,7 +9,7 @@ import sys
 import uuid
 
 # 只有命中这些关键词的短信才会离开手机（验证码、银行、聊天都不匹配）
-PATTERN = r"取件|取货|提货|驿站|快递柜|丰巢|自提点|铁路客服|12306|改签|退票|航班|值机|登机"
+PATTERN = r"取件|取货|提货|取出|签收|包裹|快递|驿站|丰巢|自提点|铁路客服|12306|改签|退票|航班|值机|登机"
 
 
 def token_string(text=None, input_attachment=False):

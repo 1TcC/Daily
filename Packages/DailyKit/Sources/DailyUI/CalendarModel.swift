@@ -36,6 +36,8 @@ public struct CalendarActions {
     public var requestCalendarAccess: () -> Void = {}
     public var setCalendarIncluded: (_ calendarID: String, _ included: Bool) -> Void = { _, _ in }
     public var disconnectRelay: () -> Void = {}
+    /// 把短信生成的取件条目标记为已取件。
+    public var markParcelPicked: (CalendarItem) -> Void = { _ in }
     /// 同步全部来源（工具栏刷新按钮）。
     public var refresh: () -> Void = {}
     public var syncRelay: () -> Void = {}
@@ -78,6 +80,8 @@ public final class CalendarModel {
     }
     public private(set) var items: [CalendarItem] = []
     public private(set) var pending: [CalendarItem] = []
+    /// 还没取的快递（短信生成的取件条目，最近 14 天），按收到时间倒序。
+    public private(set) var pendingParcels: [CalendarItem] = []
     public private(set) var loadError: String?
     /// 「现在」，测试和截图时可以固定。
     public var now: () -> Date
@@ -95,6 +99,11 @@ public final class CalendarModel {
             // 连同前后相邻的一页一起加载，翻页拖动时相邻页也有数据。
             items = try store.items(in: loadedInterval)
             pending = try store.pendingItems()
+            let now = now()
+            pendingParcels = try store.items(in: DateInterval(start: now.addingTimeInterval(-14 * 86400),
+                                                              end: now.addingTimeInterval(86400)))
+                .filter { $0.sourceKind == .parcel && $0.metadata["pickupCode"] != nil }
+                .sorted { $0.start > $1.start }
             loadError = nil
         } catch {
             loadError = String(describing: error)

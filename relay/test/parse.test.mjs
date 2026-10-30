@@ -13,9 +13,9 @@ test("菜鸟驿站到件", () => {
   assert.equal(r.type, "pickup");
   const e = r.event;
   assert.equal(e.title, "取件 6-2-1043 · 天津大学北洋园校区菜鸟驿站");
-  assert.equal(e.all_day, true);
-  assert.equal(e.start, "2026-10-30");
-  assert.equal(e.end, "2026-11-02");
+  assert.equal(e.all_day, false);
+  assert.equal(e.start, "2026-10-30T16:00:00+08:00");
+  assert.equal(e.end, undefined);
   assert.equal(e.kind, "parcel");
   assert.deepEqual(e.meta, { pickup_code: "6-2-1043", station: "天津大学北洋园校区菜鸟驿站", carrier: "中通" });
   assert.equal(e.location, "天津大学北洋园校区菜鸟驿站");

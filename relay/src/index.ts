@@ -291,7 +291,8 @@ const TOOLS = [
   },
   {
     name: "delete_event",
-    description: "删除日程，只能删除你自己创建的（editable 为 true）。 Delete an event created by you.",
+    description:
+      "删除日程：你自己创建的（editable 为 true），或短信生成的取件条目（kind 为 parcel，表示用户已取件）。 Delete an event created by you, or mark an SMS parcel (kind=parcel) as picked up.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "string", description: "日程 id / event id" } },
@@ -336,6 +337,18 @@ export class DailyStore {
     if (path === "/feed.ics") {
       if (method !== "GET" && method !== "HEAD") return methodNotAllowed("GET, HEAD");
       return this.feed();
+    }
+    // Daily 标记某条为已完成（例如「已取件」）：主密钥下可删除任意 agent event
+    const done = path.match(/^\/sync\/agent-events\/([^/]+)$/);
+    if (done) {
+      if (method !== "DELETE") return new Response(null, { status: 405, headers: { Allow: "DELETE" } });
+      const agent = await this.loadAgent();
+      const ev = agent[decodeURIComponent(done[1])];
+      if (!ev || ev.deleted) return notFound();
+      ev.deleted = true;
+      ev.updated_at = utcStamp();
+      await this.saveAgent(agent);
+      return json({ ok: true, id: ev.id });
     }
     if (path === "/sync/agent-events") {
       if (method !== "GET") return new Response(null, { status: 405, headers: { Allow: "GET" } });
@@ -770,14 +783,20 @@ export class DailyStore {
   }
 
   /** 取出可编辑的条目，否则抛出中文错误。 */
-  private findEditable(agent: Record<string, AgentEvent>, id: string, caller: string): AgentEvent {
+  private findEditable(agent: Record<string, AgentEvent>, id: string, caller: string, parcelDone = false): AgentEvent {
     if (id.startsWith("daily:")) throw new UserError("这条日程来自用户的 Daily（课程/系统日历），只读，不能修改或删除。");
     const ev = agent[id];
     if (!ev || ev.deleted) {
       throw new UserError(`找不到 id 为「${id}」的日程。只能修改/删除你自己创建的日程（editable=true），请先用 list_events 确认 id。`);
     }
     if (clientOf(ev) === SMS_CLIENT) {
-      throw new UserError("这条日程由短信自动生成（取件、车票、机票等），只读，任何 AI 都不能修改或删除。");
+      // 取件条目可以被「标记为已取件」（删除），其余短信条目只读
+      if (parcelDone && ev.kind === "parcel") return ev;
+      throw new UserError(
+        parcelDone
+          ? "这条日程由短信自动生成（车票、机票等），只读；只有取件条目可以用 delete_event 标记为已取件。"
+          : "这条日程由短信自动生成（取件、车票、机票等），只读，不能修改；取件条目可以用 delete_event 标记为已取件。",
+      );
     }
     if (clientOf(ev) !== caller) {
       throw new UserError(`这条日程是 ${clientName(clientOf(ev))} 创建的，只能由它修改或删除。`);
@@ -845,7 +864,7 @@ export class DailyStore {
   private async deleteEvent(args: Args, caller: string) {
     const id = str(args, "id", { required: true, max: 100 })!;
     const agent = await this.loadAgent();
-    const ev = this.findEditable(agent, id, caller);
+    const ev = this.findEditable(agent, id, caller, true);
     ev.deleted = true;
     ev.updated_at = utcStamp();
     await this.saveAgent(agent);

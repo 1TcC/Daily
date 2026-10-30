@@ -74,6 +74,20 @@ final class AppServices {
 
         model.actions.syncRelay = { [weak self] in Task { await self?.syncRelay() } }
         model.actions.refresh = { [weak self] in Task { await self?.syncNow() } }
+        model.actions.markParcelPicked = { [weak self] item in
+            guard let self, let id = item.metadata["relayID"], let client = relaySource?.client else { return }
+            // 先从本地去掉，界面立即更新；再通知中转服务，随后的同步会确认
+            try? store.delete(id: item.id)
+            model.reload()
+            Task {
+                do {
+                    try await client.markDone(id: id)
+                } catch {
+                    self.model.relay?.error = "标记已取件失败：\(error.localizedDescription)"
+                }
+                await self.syncRelay()
+            }
+        }
         model.actions.disconnectRelay = { [weak self] in Task { await self?.disconnectRelay() } }
         if let saved = Keychain.string(for: Self.relayAccount), let connection = RelayConnection(string: saved) {
             await connectRelay(connection, syncNow: false)
@@ -270,8 +284,14 @@ struct DailyApp: App {
     // App 结构体只创建一次，服务对象直接持有即可。
     private let services = AppServices()
 
+    init() {
+        // 只有一个主窗口：不要标签页
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
+
     var body: some Scene {
-        WindowGroup("Daily") {
+        // Window（而不是 WindowGroup）：整个 App 只有一个主窗口，不能新建第二个
+        Window("Daily", id: "main") {
             MainWindowView(model: services.model)
                 .frame(minWidth: 960, minHeight: 600)
                 .task { await services.start() }
@@ -279,6 +299,7 @@ struct DailyApp: App {
         }
         .defaultSize(width: 1200, height: 760)
         .commands {
+            CommandGroup(replacing: .newItem) {}
             TextSizeCommands(model: services.model)
             CommandMenu("数据") {
                 Button("立即同步") { Task { await services.syncNow() } }

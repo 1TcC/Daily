@@ -52,6 +52,8 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
             }
 
+            PendingParcelsSection(model: model)
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("数据来源")
                     .scaledFont(11, weight: .semibold)

@@ -24,6 +24,7 @@ public struct MainWindowView: View {
                 .toolbar { toolbar }
         }
         .environment(\.uiScale, model.textScale)
+        .environment(\.markParcelPicked, { model.actions.markParcelPicked($0) })
         .sheet(isPresented: $model.showingInbox) { PendingInboxView(model: model) }
         .sheet(isPresented: $model.showingCourseImport) { CourseImportView(model: model) }
         .onChange(of: model.mode) { pager.reset() }

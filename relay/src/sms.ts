@@ -25,7 +25,6 @@ export type SmsResult =
   | null;
 
 /** 包裹条目从收到当天起保留的天数（end 不含）。 */
-export const PARCEL_DAYS = 3;
 
 /** 同步的稳定短哈希（cyrb53 双种子，96 位），只用于生成确定性 id，非密码学用途。 */
 export function shortHash(s: string): string {
@@ -139,9 +138,9 @@ function parsePickup(t: string, sender: string, nowMs: number, clock: Clock): Sm
       // 带上收到日期：取件码可能被复用，隔天的同码快递是新包裹
       id: smsId("parcel", code, station, day),
       title: `取件 ${code} · ${station}`,
-      start: day,
-      end: clock.addDays(day, PARCEL_DAYS),
-      all_day: true,
+      // 只在收到短信的时刻出现一次；没取的件由 Daily「待取件」列表持续提醒
+      start: clock.format(nowMs),
+      all_day: false,
       location: station,
       notes: `取件码 ${code}`,
       kind: "parcel",
