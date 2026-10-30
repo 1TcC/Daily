@@ -65,6 +65,8 @@ swift run DailyDev --widgets widgets.png --now 15:10         # 桌面小组件�
 
 装好 Xcode 之后：`brew install xcodegen && xcodegen generate`，打开 `Daily.xcodeproj`，在 Signing 里选 Personal Team，运行 `Daily` scheme。
 
+改了小组件（新增种类、改尺寸）后要提高 `project.yml` 里的 `CURRENT_PROJECT_VERSION` 再编译，必要时 `killall chronod`，否则「编辑小组件」里还是旧列表。
+
 只有 Command Line Tools 时的两个坑：
 - macOS 27 SDK 里 `@State` 是宏，插件只随 Xcode 提供，所以 `DailyUI` 里不用 `@State`，视图状态放进 `CalendarModel`。
 - swift-testing 的宏插件要用 `-plugin-path` 在编译器进程内加载，`scripts/test.sh` 已处理。
