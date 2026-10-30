@@ -25,6 +25,7 @@ public struct MainWindowView: View {
         }
         .environment(\.uiScale, model.textScale)
         .sheet(isPresented: $model.showingInbox) { PendingInboxView(model: model) }
+        .sheet(isPresented: $model.showingCourseImport) { CourseImportView(model: model) }
         .onChange(of: model.mode) { pager.reset() }
     }
 

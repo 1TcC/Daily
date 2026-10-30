@@ -64,6 +64,9 @@ struct SidebarView: View {
                     if kind == .systemCalendar {
                         SystemCalendarList(model: model)
                     }
+                    if kind == .course {
+                        CourseImportEntry(model: model)
+                    }
                 }
             }
         }
@@ -133,6 +136,34 @@ private struct SystemCalendarList: View {
         .buttonStyle(.plain)
         .padding(.leading, 29)
         .frame(height: 22 * scale)
+    }
+}
+
+/// 「教务课程」下面：已导入课表的摘要，以及导入 / 重新导入的入口。
+private struct CourseImportEntry: View {
+    let model: CalendarModel
+    @Environment(\.uiScale) private var scale
+
+    var body: some View {
+        Button { model.showingCourseImport = true } label: {
+            HStack(spacing: 4) {
+                Image(systemName: model.courseSchedule == nil ? "square.and.arrow.down" : "arrow.triangle.2.circlepath")
+                Text(label).lineLimit(1)
+            }
+            .scaledFont(11)
+            .foregroundStyle(SourceKind.course.color)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.leading, 29)
+        .frame(height: 22 * scale)
+        .help("在 App 内登录教务系统并导入课表")
+    }
+
+    private var label: String {
+        guard let schedule = model.courseSchedule else { return "从教务系统导入课表…" }
+        let count = Set(schedule.courses.map(\.name)).count
+        return "\(schedule.semester ?? "已导入") · \(count) 门课 · 重新导入"
     }
 }
 

@@ -20,6 +20,12 @@ public struct Preferences: Sendable {
         nonmutating set { defaults.set(newValue, forKey: "textScale") }
     }
 
+    /// 教务系统网址（导入课表时打开）。
+    public var courseSiteURL: String {
+        get { defaults.string(forKey: "courseSiteURL") ?? "https://classes.tju.edu.cn/eams/homeExt.action" }
+        nonmutating set { defaults.set(newValue, forKey: "courseSiteURL") }
+    }
+
     /// 不同步的系统日历（EKCalendar.calendarIdentifier）。
     public var excludedCalendarIDs: Set<String> {
         get { Set(defaults.stringArray(forKey: "excludedCalendarIDs") ?? []) }

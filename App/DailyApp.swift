@@ -21,11 +21,13 @@ final class AppServices {
         self.sync = SyncEngine(store: store)
         self.model = CalendarModel(store: store)
         model.excludedCalendarIDs = Preferences.shared.excludedCalendarIDs
+        model.courseSchedule = try? store.courseSchedule()
     }
 
     func start() async {
         await sync.register(SubscriptionProvider(store: store))
         await sync.register(systemCalendar)
+        await sync.register(CourseScheduleProvider(store: store))
 
         model.actions.requestCalendarAccess = { [weak self] in
             Task { await self?.requestCalendarAccess() }
@@ -35,6 +37,15 @@ final class AppServices {
             if included { excluded.remove(id) } else { excluded.insert(id) }
             Preferences.shared.excludedCalendarIDs = excluded
             Task { await self?.syncSystemCalendar() }
+        }
+        model.actions.importCourseSchedule = { [weak self] schedule in
+            guard let self else { return }
+            try? store.saveCourseSchedule(schedule)
+            model.courseSchedule = schedule
+            Task {
+                try? await self.sync.sync(sourceID: CourseScheduleProvider.id, in: self.syncedRange ?? self.syncWindow)
+                self.finishSync()
+            }
         }
         model.actions.visibleRangeChanged = { [weak self] interval in
             guard let self, let synced = syncedRange,

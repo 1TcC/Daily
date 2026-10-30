@@ -44,6 +44,13 @@ public final class ItemStore: Sendable {
                 try db.setUserVersion(1)
             }
         }
+        if db.userVersion < 2 {
+            try db.transaction {
+                // 整块保存的设置类数据（例如导入的课表），值是 JSON。
+                try db.execute("CREATE TABLE documents (key TEXT PRIMARY KEY, json TEXT NOT NULL)")
+                try db.setUserVersion(2)
+            }
+        }
     }
 
     // MARK: - 日程
@@ -140,6 +147,31 @@ public final class ItemStore: Sendable {
 
     public func deleteSubscription(id: UUID) throws {
         try db.execute("DELETE FROM subscriptions WHERE id = ?", [.text(id.uuidString)])
+    }
+
+    // MARK: - 课表
+
+    public func courseSchedule() throws -> CourseSchedule? {
+        try document(CourseSchedule.self, key: "courseSchedule")
+    }
+
+    public func saveCourseSchedule(_ schedule: CourseSchedule?) throws {
+        try saveDocument(schedule, key: "courseSchedule")
+    }
+
+    private func document<T: Decodable>(_ type: T.Type, key: String) throws -> T? {
+        guard let json = try db.query("SELECT json FROM documents WHERE key = ?", [.text(key)]).first?.string("json")
+        else { return nil }
+        return try JSONDecoder().decode(T.self, from: Data(json.utf8))
+    }
+
+    private func saveDocument<T: Encodable>(_ value: T?, key: String) throws {
+        guard let value else {
+            try db.execute("DELETE FROM documents WHERE key = ?", [.text(key)])
+            return
+        }
+        let json = String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
+        try db.execute("INSERT OR REPLACE INTO documents (key, json) VALUES (?, ?)", [.text(key), .text(json)])
     }
 
     // MARK: - 编解码

@@ -16,6 +16,8 @@ public enum ViewMode: String, CaseIterable, Identifiable, Sendable {
 public struct CalendarActions {
     public var requestCalendarAccess: () -> Void = {}
     public var setCalendarIncluded: (_ calendarID: String, _ included: Bool) -> Void = { _, _ in }
+    /// 从教务系统导入了新课表。
+    public var importCourseSchedule: (CourseSchedule) -> Void = { _ in }
     /// 显示范围变了（翻页、切换视图），App 可以据此补同步该范围。
     public var visibleRangeChanged: (DateInterval) -> Void = { _ in }
     public init() {}
@@ -31,6 +33,9 @@ public final class CalendarModel {
     public var hiddenKinds: Set<SourceKind> = []
     public var lastSync: Date?
     public var showingInbox = false
+    public var showingCourseImport = false
+    /// 已导入的课表，用于侧边栏摘要和显示教学周。
+    public var courseSchedule: CourseSchedule?
     /// 主窗口字体缩放，见 `TextScale`。
     public var textScale = CGFloat(Preferences.shared.textScale) {
         didSet { Preferences.shared.textScale = Double(textScale) }
@@ -153,7 +158,13 @@ public final class CalendarModel {
     public var subtitle: String {
         switch mode {
         case .day: anchorDate.formatted("EEEE", calendar: calendar)
-        case .week, .list: "第 \(calendar.component(.weekOfYear, from: anchorDate)) 周"
+        case .week, .list:
+            if let schedule = courseSchedule, let week = schedule.week(of: anchorDate, calendar: calendar),
+               week <= max(schedule.lastWeek, 1) + 2 {
+                "教学第 \(week) 周"
+            } else {
+                "第 \(calendar.component(.weekOfYear, from: anchorDate)) 周"
+            }
         case .month: ""
         }
     }
