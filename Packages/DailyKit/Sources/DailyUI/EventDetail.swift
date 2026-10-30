@@ -1,7 +1,7 @@
 import DailyKit
 import SwiftUI
 
-extension CalendarItem {
+public extension CalendarItem {
     /// 「13:30 – 15:05」；`compact` 时去掉空格，窄处更容易放下。
     func timeText(calendar: Calendar, compact: Bool = false) -> String {
         if isAllDay { return "全天" }

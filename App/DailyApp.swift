@@ -346,13 +346,13 @@ final class AppServices {
         finishSync()
     }
 
-    /// 把今天前 7 天到后 60 天的日程（来自中转服务的除外）上传给中转服务，内容没变就跳过。
+    /// 把今天前 30 天到后 180 天的日程（来自中转服务的除外）上传给中转服务，内容没变就跳过。
     private func uploadSnapshotIfNeeded() {
         guard let client = relaySource?.client else { return }
         let calendar = model.calendar
         let today = calendar.startOfDay(for: .now)
-        let range = DateInterval(start: calendar.date(byAdding: .day, value: -7, to: today)!,
-                                 end: calendar.date(byAdding: .day, value: 60, to: today)!)
+        let range = DateInterval(start: calendar.date(byAdding: .day, value: -30, to: today)!,
+                                 end: calendar.date(byAdding: .day, value: 180, to: today)!)
         // 中转服务自己的条目（AI 和短信写入的）不回传，否则 Grok 和 iPhone 订阅里会出现两份
         guard let items = try? store.items(in: range).filter({ $0.sourceID != AgentRelaySource.id }),
               let body = try? RelayClient.snapshotBody(items, calendar: calendar),

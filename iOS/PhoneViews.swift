@@ -2,63 +2,35 @@ import DailyKit
 import DailyUI
 import SwiftUI
 
-/// 日程：从某天起按天列出 31 天内的安排，今天总是显示。
+/// 列表：和系统日历的列表视图一样，从某天起按天列出 31 天内的安排。
 struct AgendaView: View {
     let services: PhoneServices
-    @State private var picking = false
-    @State private var adding = false
-    @State private var selected: CalendarItem?
+    let onOpen: (CalendarItem) -> Void
 
     var body: some View {
         let cal = services.calendar
-        NavigationStack {
-            List {
-                if let error = services.error {
-                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange).font(.footnote)
-                }
-                ForEach(services.days) { day in
-                    Section {
-                        if day.items.isEmpty {
-                            Text("没有安排").foregroundStyle(.secondary).font(.subheadline)
-                        }
-                        ForEach(day.items) { item in
-                            PhoneEventRow(item: item, calendar: cal)
-                                .contentShape(Rectangle())
-                                .onTapGesture { selected = item }
-                        }
-                    } header: {
-                        DayHeader(date: day.date, calendar: cal)
+        List {
+            if let error = services.error {
+                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange).font(.footnote)
+            }
+            ForEach(services.days) { day in
+                Section {
+                    if day.items.isEmpty {
+                        Text("没有安排").foregroundStyle(.secondary).font(.subheadline)
                     }
-                }
-                if services.days.count <= 1 {
-                    Text("之后 30 天没有其他安排").foregroundStyle(.secondary).font(.footnote)
-                }
-            }
-            .listStyle(.insetGrouped)
-            .refreshable { await services.syncNow() }
-            .navigationTitle(services.startDate.formatted("M月", calendar: cal))
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if !cal.isDateInToday(services.startDate) {
-                        Button("今天") { services.startDate = cal.startOfDay(for: .now) }
+                    ForEach(day.items) { item in
+                        PhoneEventRow(item: item, calendar: cal)
+                            .contentShape(Rectangle())
+                            .onTapGesture { onOpen(item) }
                     }
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { picking = true } label: { Image(systemName: "calendar") }
-                    Button { adding = true } label: { Image(systemName: "plus") }
+                } header: {
+                    DayHeader(date: day.date, calendar: cal)
                 }
             }
-            .sheet(item: $selected) { item in
-                ScrollView { EventDetailView(item: item, calendar: cal).frame(maxWidth: .infinity, alignment: .leading) }
-                    .environment(\.markParcelPicked, { services.markPicked($0) })
-                    .presentationDetents([.medium, .large])
-            }
-            .sheet(isPresented: $picking) {
-                DayPicker(date: services.startDate) { services.startDate = cal.startOfDay(for: $0) }
-                    .presentationDetents([.medium])
-            }
-            .sheet(isPresented: $adding) { AddEventView(services: services) }
         }
+        .listStyle(.plain)
+        .refreshable { await services.syncNow() }
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -110,34 +82,10 @@ struct PhoneEventRow: View {
     }
 }
 
-private struct DayPicker: View {
-    @State var date: Date
-    let onPick: (Date) -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            DatePicker("日期", selection: $date, displayedComponents: .date)
-                .datePickerStyle(.graphical)
-                .environment(\.locale, Locale(identifier: "zh_CN"))
-                .padding(.horizontal)
-                .navigationTitle("跳到某天")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("完成") {
-                            onPick(date)
-                            dismiss()
-                        }
-                    }
-                }
-        }
-    }
-}
-
 /// 待取件：大号取件码，取完点「已取」（Mac 和小组件同步消失）。
 struct ParcelsView: View {
     let services: PhoneServices
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         let cal = services.calendar
@@ -169,6 +117,10 @@ struct ParcelsView: View {
             }
             .refreshable { await services.syncNow() }
             .navigationTitle("待取件")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
+            }
         }
     }
 }
@@ -176,11 +128,15 @@ struct ParcelsView: View {
 /// 新建日程：写进中转服务，Mac 上显示在「Agent / Bot 写入」里。
 struct AddEventView: View {
     let services: PhoneServices
-    @State private var draft = EventDraft(start: Calendar.mondayFirst.nextDate(
-        after: .now, matching: DateComponents(minute: 0), matchingPolicy: .nextTime) ?? .now, calendar: .mondayFirst)
+    @State private var draft: EventDraft
     @State private var saving = false
     @State private var error: String?
     @Environment(\.dismiss) private var dismiss
+
+    init(services: PhoneServices, start: Date) {
+        self.services = services
+        _draft = State(initialValue: EventDraft(start: start, calendar: services.calendar))
+    }
 
     var body: some View {
         NavigationStack {

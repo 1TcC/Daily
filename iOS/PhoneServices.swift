@@ -32,6 +32,8 @@ final class PhoneServices {
     var startDate: Date { didSet { reload() } }
     private(set) var days: [DayAgenda] = []
     private(set) var pendingParcels: [CalendarItem] = []
+    /// 每天（当天零点）的日程，月视图和时间轴用。
+    private var itemsByDay: [Date: [CalendarItem]] = [:]
 
     var usesLocalCalendar = Preferences.shared.usesLocalCalendar {
         didSet {
@@ -81,10 +83,16 @@ final class PhoneServices {
         }
         #endif
         await configureSources()
-        if await reminders.authorizationStatus() == .notDetermined {
-            await reminders.requestAuthorization()
+        // 不等用户点通知授权，先同步
+        Task {
+            #if DEBUG
+            if UserDefaults.standard.string(forKey: "dailyConnect") != nil { return }  // 截图时不弹授权框
+            #endif
+            if await reminders.authorizationStatus() == .notDetermined {
+                await reminders.requestAuthorization()
+            }
+            await refreshNotificationAccess()
         }
-        await refreshNotificationAccess()
         await syncNow()
     }
 
@@ -160,8 +168,8 @@ final class PhoneServices {
 
     private var syncRange: DateInterval {
         let today = calendar.startOfDay(for: .now)
-        return DateInterval(start: calendar.date(byAdding: .day, value: -7, to: today)!,
-                            end: calendar.date(byAdding: .day, value: 62, to: today)!)
+        return DateInterval(start: calendar.date(byAdding: .day, value: -35, to: today)!,
+                            end: calendar.date(byAdding: .day, value: 190, to: today)!)
     }
 
     func syncNow() async {
@@ -201,6 +209,23 @@ final class PhoneServices {
         }
         days = result
         pendingParcels = (try? store.pendingParcels(now: now)) ?? []
+
+        var byDay: [Date: [CalendarItem]] = [:]
+        for item in (try? store.items(in: syncRange)) ?? [] {
+            var day = calendar.startOfDay(for: item.start)
+            // 全天日程的结束是次日零点（不含）；跨午夜的定时日程每天都画一段
+            let last = item.isAllDay ? item.effectiveEnd.addingTimeInterval(-1) : item.effectiveEnd
+            repeat {
+                byDay[day, default: []].append(item)
+                day = calendar.date(byAdding: .day, value: 1, to: day)!
+            } while day <= last && byDay.count < 400
+        }
+        itemsByDay = byDay
+    }
+
+    func items(on day: Date) -> [CalendarItem] {
+        // 全天的排在前面
+        (itemsByDay[calendar.startOfDay(for: day)] ?? []).sorted { ($0.isAllDay ? 0 : 1, $0.start) < ($1.isAllDay ? 0 : 1, $1.start) }
     }
 
     // MARK: - 取件

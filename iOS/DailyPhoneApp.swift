@@ -63,12 +63,7 @@ struct PhoneRootView: View {
         if services.connection == nil {
             ConnectView(services: services)
         } else {
-            TabView {
-                Tab("日程", systemImage: "calendar") { AgendaView(services: services) }
-                Tab("待取件", systemImage: "shippingbox") { ParcelsView(services: services) }
-                    .badge(services.pendingParcels.count)
-                Tab("设置", systemImage: "gearshape") { PhoneSettingsView(services: services) }
-            }
+            PhoneCalendarView(services: services)
         }
     }
 }
