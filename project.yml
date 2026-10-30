@@ -10,7 +10,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "2"
+    CURRENT_PROJECT_VERSION: "3"
     CODE_SIGN_STYLE: Automatic
     # Personal Team。
     DEVELOPMENT_TEAM: 6UY9Y37MQH
@@ -37,6 +37,8 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Daily
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
         DailyAppGroup: $(TeamIdentifierPrefix)com.rain.daily
         CFBundleURLTypes:
@@ -71,6 +73,8 @@ targets:
       path: Widget/Info.plist
       properties:
         CFBundleDisplayName: Daily 小组件
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         DailyAppGroup: $(TeamIdentifierPrefix)com.rain.daily
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
