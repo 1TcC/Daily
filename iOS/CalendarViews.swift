@@ -43,9 +43,9 @@ enum MonthStyle: String, CaseIterable, Identifiable {
 
     var rowHeight: CGFloat {
         switch self {
-        case .compact: 62
-        case .stacked: 78
-        case .details: 96
+        case .compact: 74
+        case .stacked: 94
+        case .details: 124
         }
     }
 }
@@ -295,7 +295,7 @@ private struct MonthScreen: View {
             HStack(spacing: 0) {
                 ForEach(["一", "二", "三", "四", "五", "六", "日"], id: \.self) { name in
                     Text(name)
-                        .font(.caption2)
+                        .font(.footnote)
                         .foregroundStyle(name == "六" || name == "日" ? .secondary : .primary)
                         .frame(maxWidth: .infinity)
                 }
@@ -382,17 +382,17 @@ private struct DayCell: View {
         let weekend = calendar.isDateInWeekend(day)
         VStack(spacing: 1) {
             ZStack {
-                if today { Circle().fill(Color.red).frame(width: 25, height: 25) }
+                if today { Circle().fill(Color.red).frame(width: 30, height: 30) }
                 Text("\(calendar.component(.day, from: day))")
-                    .font(.system(size: 15, weight: today ? .semibold : .regular))
+                    .font(.system(size: 18, weight: today ? .semibold : .regular))
                     .foregroundStyle(today ? .white : (weekend ? .secondary : .primary))
             }
-            .frame(height: 25)
+            .frame(height: 30)
             Text(Lunar.dayText(day))
-                .font(.system(size: 8))
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .frame(height: 10)
+                .frame(height: 13)
             content
             Spacer(minLength: 0)
         }
@@ -406,32 +406,38 @@ private struct DayCell: View {
         case .compact:
             // 紧凑：有安排就显示一个小圆点
             if !items.isEmpty {
-                Circle().fill(Color.secondary).frame(width: 5, height: 5).padding(.top, 2)
+                Circle().fill(Color.secondary).frame(width: 6, height: 6).padding(.top, 3)
             }
         case .stacked:
             // 叠放：每项一条色带，不写字
             VStack(spacing: 2) {
                 ForEach(items.prefix(4)) { item in
-                    RoundedRectangle(cornerRadius: 1.5).fill(item.eventBar(scheme)).frame(height: 5)
+                    RoundedRectangle(cornerRadius: 2).fill(item.eventBar(scheme)).frame(height: 7)
                 }
             }
             .padding(.horizontal, 5)
             .padding(.top, 2)
         case .details:
             // 详细信息：写出日程名称
-            VStack(spacing: 1) {
+            VStack(spacing: 2) {
                 ForEach(items.prefix(3)) { item in
-                    Text(item.title)
-                        .font(.system(size: 9, weight: .medium))
-                        .lineLimit(1)
-                        .foregroundStyle(item.eventText(scheme))
-                        .padding(.horizontal, 2)
-                        .frame(maxWidth: .infinity, minHeight: 12, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 2).fill(item.eventFill(scheme)))
+                    // 放不下就裁掉，不加省略号，同样宽度能多看到一两个字
+                    Color.clear
+                        .frame(maxWidth: .infinity, minHeight: 17, maxHeight: 17)
+                        .overlay(alignment: .leading) {
+                            Text(item.title)
+                                .font(.system(size: 12, weight: .medium))
+                                .lineLimit(1)
+                                .fixedSize()
+                                .foregroundStyle(item.eventText(scheme))
+                                .padding(.leading, 3)
+                        }
+                        .clipped()
+                        .background(RoundedRectangle(cornerRadius: 3).fill(item.eventFill(scheme)))
                 }
                 if items.count > 3 {
                     Text("+\(items.count - 3)")
-                        .font(.system(size: 8))
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                 }
             }
